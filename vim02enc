@@ -59,12 +59,20 @@ then
             v02enc --input "${1}" --key "${V02ENC_KEY}" --output "${1}" --update "${TEMPFILE}"
           fi
         else
-          # use armored output
-          if [[ "${V02ENC_ARMOR}" -eq "1" ]]
+          FILESIZE=$(cat "${TEMPFILE}" | wc -c | tr -d "[:space:]")
+
+          # ignore zero-sized file
+          if [[ "${FILESIZE}" -gt "0" ]]
           then
-            v02enc --armor --encrypt --input "${TEMPFILE}" --key "${V02ENC_KEY}" --output "${1}"
+            # use armored output
+            if [[ "${V02ENC_ARMOR}" -eq "1" ]]
+            then
+              v02enc --armor --encrypt --input "${TEMPFILE}" --key "${V02ENC_KEY}" --output "${1}"
+            else
+              v02enc --encrypt --input "${TEMPFILE}" --key "${V02ENC_KEY}" --output "${1}"
+            fi
           else
-            v02enc --encrypt --input "${TEMPFILE}" --key "${V02ENC_KEY}" --output "${1}"
+            echo "INFO: Skipping zero-sized file." >&2
           fi
         fi
 
