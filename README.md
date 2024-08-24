@@ -1,6 +1,6 @@
 # v02enc
 
-`v02enc` is a password-based encryption application that support several recipients and has the option to update an encrypted file as long as the user has access to the password of a single recipient.
+`v02enc` is a password-based encryption application that supports several recipients and has the option to update an encrypted file as long as the user has access to the password of a single recipient.
 
 `vim02enc` is a small script that enables a user to transparently edit a `v02enc`-encrypted file. After closing the file, it will be encrypted for all former recipients.
 
