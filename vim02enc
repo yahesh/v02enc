@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+
+# prepare the exit code
+EXITCODE="0"
+
+# set a default for the armoring if none is given
+if [[ -z "${V02ENC_ARMOR}" ]]
+then
+  V02ENC_ARMOR="1"
+fi
+
+# set a default for the key file if none is given
+if [[ -z "${V02ENC_KEY}" ]]
+then
+  V02ENC_KEY=~/.v02enc
+fi
+
+if [[ -f "${V02ENC_KEY}" ]]
+then
+  # Do we update an existing file?
+  UPDATE="0"
+
+  # generate the temporary file name
+  TEMPFILE=$(/usr/bin/env mktemp)
+
+  if [[ -f "${1}" ]]
+  then
+    UPDATE="1"
+
+    # decrypt the file
+    v02enc --decrypt --key "${V02ENC_KEY}" --input "${1}" --output "${TEMPFILE}"
+  else
+    # create the temporary file
+    touch "${TEMPFILE}"
+  fi
+
+  if [[ "$?" -eq "0" ]]
+  then
+    # set restrictive temporary file access
+    chmod 600 "${TEMPFILE}"
+
+    # only proceed if the temporary file is somewhat protected
+    if [[ "$?" -eq "0" ]]
+    then
+      # open vim as the editor but disable the swap file
+      /usr/bin/env vim -n "${TEMPFILE}"
+
+      # only proceed if we closed vim properly
+      if [[ "$?" -eq 0 ]]
+      then
+        # we update the file
+        if [[ "${UPDATE}" -eq "1" ]]
+        then
+          # use armored output
+          if [[ "${V02ENC_ARMOR}" -eq "1" ]]
+          then
+            v02enc --armor --input "${1}" --key "${V02ENC_KEY}" --output "${1}" --update "${TEMPFILE}"
+          else
+            v02enc --input "${1}" --key "${V02ENC_KEY}" --output "${1}" --update "${TEMPFILE}"
+          fi
+        else
+          # use armored output
+          if [[ "${V02ENC_ARMOR}" -eq "1" ]]
+          then
+            v02enc --armor --encrypt --input "${TEMPFILE}" --key "${V02ENC_KEY}" --output "${1}"
+          else
+            v02enc --encrypt --input "${TEMPFILE}" --key "${V02ENC_KEY}" --output "${1}"
+          fi
+        fi
+
+        # print a message if an error occured
+        if [[ "$?" -ne "0" ]]
+        then
+          echo "ERROR: File could not be encrypted." >&2
+          EXITCODE="5";
+        fi
+      else
+        echo "ERROR: Vim closed unexpectedly." >&2
+        EXITCODE="4";
+      fi
+    else
+      echo "ERROR: Temporary file access could not be restricted." >&2
+      EXITCODE="3";
+    fi
+  else
+    echo "ERROR: Temporary file could not be prepared." >&2
+    EXITCODE="2";
+  fi
+
+  # try to delete the temporary file either way
+  rm -f "${TEMPFILE}"
+else
+  echo "ERROR: v02enc key file does not exit: ${V02ENC_KEY}" >&2
+  EXITCODE="1";
+fi
+
+# set the exit code
+exit "${EXITCODE}"
