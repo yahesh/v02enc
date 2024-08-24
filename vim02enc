@@ -46,7 +46,7 @@ then
       /usr/bin/env vim -n "${TEMPFILE}"
 
       # only proceed if we closed vim properly
-      if [[ "$?" -eq 0 ]]
+      if [[ "$?" -eq "0" ]]
       then
         # we update the file
         if [[ "${UPDATE}" -eq "1" ]]
