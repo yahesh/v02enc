@@ -42,28 +42,32 @@ then
     # only proceed if the temporary file is somewhat protected
     if [[ "$?" -eq "0" ]]
     then
+      # get the last-modified date of the temporary file
+      LASTMODIFIED=$(date -r "${TEMPFILE}" "+%s")
+
       # open vim as the editor but disable the swap file
       /usr/bin/env vim -n "${TEMPFILE}"
 
       # only proceed if we closed vim properly
       if [[ "$?" -eq "0" ]]
       then
-        # we update the file
-        if [[ "${UPDATE}" -eq "1" ]]
-        then
-          # use armored output
-          if [[ "${V02ENC_ARMOR}" -eq "1" ]]
-          then
-            v02enc --armor --input "${1}" --key "${V02ENC_KEY}" --output "${1}" --update "${TEMPFILE}"
-          else
-            v02enc --input "${1}" --key "${V02ENC_KEY}" --output "${1}" --update "${TEMPFILE}"
-          fi
-        else
-          FILESIZE=$(cat "${TEMPFILE}" | wc -c | tr -d "[:space:]")
+        # get the new last-modified date of the temporary file
+        NEWMODIFIED=$(date -r "${TEMPFILE}" "+%s")
 
-          # ignore zero-sized file
-          if [[ "${FILESIZE}" -gt "0" ]]
+        # only change the original file if the temporary file has changed
+        if [[ "${NEWMODIFIED}" -gt "${LASTMODIFIED}" ]]
+        then
+          # we update the file
+          if [[ "${UPDATE}" -eq "1" ]]
           then
+            # use armored output
+            if [[ "${V02ENC_ARMOR}" -eq "1" ]]
+            then
+              v02enc --armor --input "${1}" --key "${V02ENC_KEY}" --output "${1}" --update "${TEMPFILE}"
+            else
+              v02enc --input "${1}" --key "${V02ENC_KEY}" --output "${1}" --update "${TEMPFILE}"
+            fi
+          else
             # use armored output
             if [[ "${V02ENC_ARMOR}" -eq "1" ]]
             then
@@ -71,9 +75,9 @@ then
             else
               v02enc --encrypt --input "${TEMPFILE}" --key "${V02ENC_KEY}" --output "${1}"
             fi
-          else
-            echo "INFO: Skipping zero-sized file." >&2
           fi
+        else
+          echo "INFO: Skipping unmodified file." >&2
         fi
 
         # print a message if an error occured

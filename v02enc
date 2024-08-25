@@ -104,14 +104,15 @@ function decrypt_v02($message, $recipients, &$error) {
         $data[MACMESSAGE] = substr($data[FULLMESSAGE],   0, -32);
         $data[MAC]        = substr($data[FULLMESSAGE], -32);
 
-        $data[VERSION] = substr($data[MACMESSAGE], 0,  1);
-        $data[SALT]    = substr($data[MACMESSAGE], 1, 32);
+        $data[VERSION]     = substr($data[MACMESSAGE], 0,     1);
+        $data[SALT]        = substr($data[MACMESSAGE], 1,    32);
+        $data[SUBKEYNONCE] = substr($data[MACMESSAGE], 1+32, 16);
 
-        $data[SUBKEYCOUNT] = hexdec(bin2hex(substr($data[MACMESSAGE], 1+32, 2)));
+        $data[SUBKEYCOUNT] = hexdec(bin2hex(substr($data[MACMESSAGE], 1+32+16, 2)));
         $data[SUBKEYS]     = [];
 
         # iterate through the subkeys
-        $position = 1+32+2;
+        $position = 1+32+16+2;
         for ($i = 0; $i < $data[SUBKEYCOUNT]; $i++) {
           $data[SUBKEYS][$i]                = [];
           $data[SUBKEYS][$i][CHECKMAC]      = [];
@@ -119,11 +120,10 @@ function decrypt_v02($message, $recipients, &$error) {
           $data[SUBKEYS][$i][KEY]           = [];
           $data[SUBKEYS][$i][MACKEY]        = [];
           $data[SUBKEYS][$i][SUBKEYDERIVED] = [];
-          $data[SUBKEYS][$i][SUBKEYMESSAGE] = substr($data[MACMESSAGE], $position+16, 32);
-          $data[SUBKEYS][$i][SUBKEYNONCE]   = substr($data[MACMESSAGE], $position+0,  16);
+          $data[SUBKEYS][$i][SUBKEYMESSAGE] = substr($data[MACMESSAGE], $position, 32);
 
           # update position of next entry
-          $position = $position+16+32;
+          $position = $position+32;
         }
 
         $data[NONCE]      = substr($data[MACMESSAGE], $position, 16);
@@ -143,7 +143,7 @@ function decrypt_v02($message, $recipients, &$error) {
 
               if (false !== $data[SUBKEYS][$subkey][SUBKEYDERIVED][$key]) {
                 # decrypt subkey with derived secure key
-                $data[SUBKEYS][$subkey][KEY][$key] = openssl_decrypt($data[SUBKEYS][$subkey][SUBKEYMESSAGE], "aes-256-ctr", $data[SUBKEYS][$subkey][SUBKEYDERIVED][$key], OPENSSL_RAW_DATA | OPENSSL_ZERO_PADDING, $data[SUBKEYS][$subkey][SUBKEYNONCE]);
+                $data[SUBKEYS][$subkey][KEY][$key] = openssl_decrypt($data[SUBKEYS][$subkey][SUBKEYMESSAGE], "aes-256-ctr", $data[SUBKEYS][$subkey][SUBKEYDERIVED][$key], OPENSSL_RAW_DATA | OPENSSL_ZERO_PADDING, $data[SUBKEYNONCE]);
 
                 if (false !== $data[SUBKEYS][$subkey][KEY][$key]) {
                   # generate MAC key
@@ -200,7 +200,6 @@ function encrypt_v02($message, $recipients, &$error) {
 
   if (is_string($message) && is_array($recipients)) {
     $data = [];
-    $time = time(); // needed for nonces
 
     try {
       # set and generate values
@@ -214,28 +213,27 @@ function encrypt_v02($message, $recipients, &$error) {
         $data[MACKEY] = hash_hmac("sha256", "mac", $data[KEY], true); // generate mac key
 
         if ((false !== $data[ENCKEY]) && (false !== $data[MACKEY])) {
-          $data[NONCE] = hex2bin(sprintf("%016x0000000000000000", $time)); // generate nonce
+          # use the same time for both nonces
+          $time = time();
 
-          if (false !== $data[NONCE]) {
+          $data[NONCE]       = hex2bin(sprintf("%016x0000000000000000", $time)); // generate nonce
+          $data[SUBKEYNONCE] = hex2bin(sprintf("%016xFFFFFFFF00000000", $time)); // generate nonce
+
+          if ((false !== $data[NONCE]) && (false !== $data[SUBKEYNONCE])) {
             # iterate through recipients and generate rsa keys
             $data[SUBKEYCOUNT]   = 0;
             $data[SUBKEYDERIVED] = [];
             $data[SUBKEYMESSAGE] = [];
-            $data[SUBKEYNONCE]   = [];
 
             $keys = array_keys($recipients);
             foreach ($keys as $key) {
-              $data[SUBKEYNONCE][$key] = hex2bin(sprintf("%016x01%04x0000000000", $time, $data[SUBKEYCOUNT])); // generate nonce
+              $data[SUBKEYDERIVED][$key] = hash_pbkdf2("sha256", $recipients[$key], $data[SALT], 512000, 0, true);
 
-              if (false !== $data[SUBKEYNONCE][$key]) {
-                $data[SUBKEYDERIVED][$key] = hash_pbkdf2("sha256", $recipients[$key], $data[SALT], 512000, 0, true);
+              if (false !== $data[SUBKEYDERIVED][$key]) {
+                $data[SUBKEYMESSAGE][$key] = openssl_encrypt($data[KEY], "aes-256-ctr", $data[SUBKEYDERIVED][$key], OPENSSL_RAW_DATA | OPENSSL_ZERO_PADDING, $data[SUBKEYNONCE]);
 
-                if (false !== $data[SUBKEYDERIVED][$key]) {
-                  $data[SUBKEYMESSAGE][$key] = openssl_encrypt($data[KEY], "aes-256-ctr", $data[SUBKEYDERIVED][$key], OPENSSL_RAW_DATA | OPENSSL_ZERO_PADDING, $data[SUBKEYNONCE][$key]);
-
-                  if (false !== $data[SUBKEYMESSAGE][$key]) {
-                    $data[SUBKEYCOUNT] = $data[SUBKEYCOUNT]+1;
-                  }
+                if (false !== $data[SUBKEYMESSAGE][$key]) {
+                  $data[SUBKEYCOUNT] = $data[SUBKEYCOUNT]+1;
                 }
               }
             }
@@ -249,11 +247,11 @@ function encrypt_v02($message, $recipients, &$error) {
                 # concatenate the mac message
                 $data[MACMESSAGE]  = $data[VERSION];
                 $data[MACMESSAGE] .= $data[SALT];
+                $data[MACMESSAGE] .= $data[SUBKEYNONCE];
                 $data[MACMESSAGE] .= hex2bin(sprintf("%04x", $data[SUBKEYCOUNT]));
 
                 $keys = array_keys($recipients);
                 foreach ($keys as $key) {
-                  $data[MACMESSAGE] .= $data[SUBKEYNONCE][$key];
                   $data[MACMESSAGE] .= $data[SUBKEYMESSAGE][$key];
                 }
 
@@ -314,14 +312,15 @@ function update_v02($message, $replacement, $recipients, &$error) {
         $data[MACMESSAGE] = substr($data[FULLMESSAGE],   0, -32);
         $data[MAC]        = substr($data[FULLMESSAGE], -32);
 
-        $data[VERSION] = substr($data[MACMESSAGE], 0,  1);
-        $data[SALT]    = substr($data[MACMESSAGE], 1, 32);
+        $data[VERSION]     = substr($data[MACMESSAGE], 0,     1);
+        $data[SALT]        = substr($data[MACMESSAGE], 1,    32);
+        $data[SUBKEYNONCE] = substr($data[MACMESSAGE], 1+32, 16);
 
-        $data[SUBKEYCOUNT] = hexdec(bin2hex(substr($data[MACMESSAGE], 1+32, 2)));
+        $data[SUBKEYCOUNT] = hexdec(bin2hex(substr($data[MACMESSAGE], 1+32+16,  2)));
         $data[SUBKEYS]     = [];
 
         # iterate through the subkeys
-        $position = 1+32+2;
+        $position = 1+32+16+2;
         for ($i = 0; $i < $data[SUBKEYCOUNT]; $i++) {
           $data[SUBKEYS][$i]                = [];
           $data[SUBKEYS][$i][CHECKMAC]      = [];
@@ -329,11 +328,10 @@ function update_v02($message, $replacement, $recipients, &$error) {
           $data[SUBKEYS][$i][KEY]           = [];
           $data[SUBKEYS][$i][MACKEY]        = [];
           $data[SUBKEYS][$i][SUBKEYDERIVED] = [];
-          $data[SUBKEYS][$i][SUBKEYMESSAGE] = substr($data[MACMESSAGE], $position+16, 32);
-          $data[SUBKEYS][$i][SUBKEYNONCE]   = substr($data[MACMESSAGE], $position+0,  16);
+          $data[SUBKEYS][$i][SUBKEYMESSAGE] = substr($data[MACMESSAGE], $position, 32);
 
           # update position of next entry
-          $position = $position+16+32;
+          $position = $position+32;
         }
 
         $data[NONCE]      = substr($data[MACMESSAGE], $position, 16);
@@ -353,7 +351,7 @@ function update_v02($message, $replacement, $recipients, &$error) {
 
               if (false !== $data[SUBKEYS][$subkey][SUBKEYDERIVED][$key]) {
                 # decrypt subkey with derived secure key
-                $data[SUBKEYS][$subkey][KEY][$key] = openssl_decrypt($data[SUBKEYS][$subkey][SUBKEYMESSAGE], "aes-256-ctr", $data[SUBKEYS][$subkey][SUBKEYDERIVED][$key], OPENSSL_RAW_DATA | OPENSSL_ZERO_PADDING, $data[SUBKEYS][$subkey][SUBKEYNONCE]);
+                $data[SUBKEYS][$subkey][KEY][$key] = openssl_decrypt($data[SUBKEYS][$subkey][SUBKEYMESSAGE], "aes-256-ctr", $data[SUBKEYS][$subkey][SUBKEYDERIVED][$key], OPENSSL_RAW_DATA | OPENSSL_ZERO_PADDING, $data[SUBKEYNONCE]);
 
                 if (false !== $data[SUBKEYS][$subkey][KEY][$key]) {
                   # generate MAC key
@@ -376,15 +374,13 @@ function update_v02($message, $replacement, $recipients, &$error) {
           }
 
           if (false !== $data[KEY]) {
-            $time = time(); // needed for nonces
-
             # set and generate values
             $data[NEWENCKEY]  = hash_hmac("sha256", "enc", $data[KEY], true); // generate enc key
             $data[NEWMACKEY]  = hash_hmac("sha256", "mac", $data[KEY], true); // generate mac key
             $data[NEWMESSAGE] = $replacement;
 
             if ((false !== $data[NEWENCKEY]) && (false !== $data[NEWMACKEY])) {
-              $data[NEWNONCE] = hex2bin(sprintf("%016x0000000000000000", $time)); // generate nonce
+              $data[NEWNONCE] = hex2bin(sprintf("%016x0000000000000000", time())); // generate nonce
 
               if (false !== $data[NEWNONCE]) {
                 # encrypt message with enc key
@@ -394,11 +390,11 @@ function update_v02($message, $replacement, $recipients, &$error) {
                   # concatenate the mac message
                   $data[NEWMACMESSAGE]  = $data[VERSION];
                   $data[NEWMACMESSAGE] .= $data[SALT];
+                  $data[NEWMACMESSAGE] .= $data[SUBKEYNONCE];
                   $data[NEWMACMESSAGE] .= hex2bin(sprintf("%04x", $data[SUBKEYCOUNT]));
 
                   $subkeys = array_keys($data[SUBKEYS]);
                   foreach ($subkeys as $subkey) {
-                    $data[NEWMACMESSAGE] .= $data[SUBKEYS][$subkey][SUBKEYNONCE];
                     $data[NEWMACMESSAGE] .= $data[SUBKEYS][$subkey][SUBKEYMESSAGE];
                   }
 
@@ -498,7 +494,7 @@ function check_file($options, $arguments, &$error) {
   } elseif (1 < count($arguments)) {
     if (!is_array($error)) {
       $error = [];
-    } 
+    }
     $error[] = "Too many files provided.";
   }
 
@@ -681,7 +677,7 @@ function print_error($string) {
 }
 
 function print_help() {
-  print("v02enc v0.1a0\n");
+  print("v02enc v0.2a0\n");
   print("\n");
   print("Usage:\n");
   print("\n");
