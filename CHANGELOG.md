@@ -1,3 +1,10 @@
+# 0.2a1 (2024-08-27)
+
+* check minimum length of message earlier
+* check minimum number of recipients
+* check maximum number of recipients
+* improve `README.md` with examples
+
 # 0.2a0 (2024-08-25)
 
 * improving the file structure to only use one subkey nonce
