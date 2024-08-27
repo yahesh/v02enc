@@ -51,7 +51,7 @@ Notes:
 * You can only use one output at a time.
 ```
 
-## Usage Examples
+## Examples
 
 ### Generate a random passphrase
 
