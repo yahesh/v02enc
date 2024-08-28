@@ -315,7 +315,7 @@ function update_v02($message, $replacement, $recipients, &$error) {
 
   if (is_string($message) && is_string($replacement) && is_array($recipients)) {
     # allow empty messages
-    if (131 <= strlen($data[FULLMESSAGE])) {
+    if (131 <= strlen($message)) {
       if (0 < count($recipients)) {
         $data = [];
 
@@ -695,7 +695,7 @@ function print_error($string) {
 }
 
 function print_help() {
-  print("v02enc v0.2a1\n");
+  print("v02enc v0.2a2\n");
   print("\n");
   print("Usage:\n");
   print("\n");
@@ -812,10 +812,12 @@ function main($arguments) {
 
             # load the message
             if (false === $message) {
-              $message = file_get_contents($inputfile);
+              if (!empty($inputfile)) {
+                $message = file_get_contents($inputfile);
+              }
             }
 
-            # check that the message could be loaded 
+            # check that the message could be loaded
             if (false !== $message) {
               if ($decrypt) {
                 # try to dearmor
@@ -842,7 +844,10 @@ function main($arguments) {
                 }
 
                 # load the updated message
-                $replacement = file_get_contents($update); 
+                $replacement = false;
+                if (!empty($update)) {
+                  $replacement = file_get_contents($update);
+                }
                 if (false !== $replacement) {
                   $blob = update_v02($message, $replacement, $recipients, $error);
 
@@ -857,7 +862,11 @@ function main($arguments) {
 
               # ensure that the execution succeeded
               if ((false !== $blob) && (false === $error)) {
-                if (false === file_put_contents($outputfile, $blob)) {
+                $success = false;
+                if (!empty($outputfile)) {
+                  $success = file_put_contents($outputfile, $blob);
+                }
+                if (false === $success) {
                   print_error("Output could not be written.");
                   $result = 7;
                 }

@@ -1,3 +1,8 @@
+# 0.2a2 (2024-08-28)
+
+* fix message length check during update
+* prevent fatal errors on empty paths
+
 # 0.2a1 (2024-08-27)
 
 * check minimum length of message earlier
