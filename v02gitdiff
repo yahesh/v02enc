@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+
+# set a default for the key file if none is given
+if [[ -z "${V02ENC_KEY}" ]]
+then
+  V02ENC_KEY=~/.v02enc
+fi
+
+SCRIPT_DIR=$(dirname $(realpath "$0"))
+
+# handle parameters
+GIT_ROOT="${PWD}"
+FILE1="${2}"
+MODE1="${4}"
+FILE2="${5}"
+MODE2="${7}"
+FILENAME="${1}"
+
+# prepare the exit code
+EXITCODE="0"
+
+# prepare the output
+OUTPUT=()
+TEMPFILE1="${FILE1}"
+TEMPFILE2="${FILE2}"
+
+if [[ -f "${V02ENC_KEY}" ]]
+then
+  if [[ -f "${FILE1}" || -f "${FILE2}" ]]
+  then
+    # check if we are comparing v02enc encrypted files
+    if [[ "${FILE1: -7}" == ".v02enc" || "${FILE2: -7}" == ".v02enc" ]]
+    then
+      # generate the temporary file names
+      TEMPFILE1=$(/usr/bin/env mktemp)
+      TEMPFILE2=$(/usr/bin/env mktemp)
+
+      # decrypt the first file
+      "${SCRIPT_DIR}/v02enc" --decrypt --key "${V02ENC_KEY}" --input "${FILE1}" --output "${TEMPFILE1}" 2>/dev/null
+
+      # decrypt the second file
+      "${SCRIPT_DIR}/v02enc" --decrypt --key "${V02ENC_KEY}" --input "${FILE2}" --output "${TEMPFILE2}" 2>/dev/null
+
+      # compare decrypted files
+      IFS=$'\n' OUTPUT=($(/usr/bin/env diff --color=always -Npu "${TEMPFILE1}" "${TEMPFILE2}" | /usr/bin/env colordiff))
+          
+      # try to delete the temporary file either way
+      rm -f "${TEMPFILE1}"
+
+      # try to delete the temporary file either way
+      rm -f "${TEMPFILE1}"
+    else
+      # handle as normal files
+      IFS=$'\n' OUTPUT=($(/usr/bin/env diff --color=always -Npu "${FILE1}" "${FILE2}" | /usr/bin/env colordiff))
+    fi
+  else
+    # handle as normal files
+    IFS=$'\n' OUTPUT=($(/usr/bin/env diff --color=always -Npu "${FILE1}" "${FILE2}" | /usr/bin/env colordiff))
+  fi
+else
+  echo "ERROR: v02enc key file does not exit: ${V02ENC_KEY}" >&2
+  EXITCODE="1";
+fi
+
+# only handle output if there was no error
+if [[ "${EXITCODE}" -eq "0" && "${#OUTPUT[@]}" -gt "0" ]]
+then
+  if [[ "${MODE1}" != "${MODE2}" ]]
+  then
+    echo "old mode ${MODE1}"
+    echo "new mode ${MODE2}"
+  fi
+
+  # prepare first output line
+  LINE="${OUTPUT[0]}"
+  LINE="${LINE#"--- ${TEMPFILE1}"}"
+  if [[ "${FILE1}" == "/dev/null" ]]
+  then
+    OUTPUT[0]="--- /dev/null"
+  else
+    OUTPUT[0]="--- a/${FILENAME}"
+  fi
+
+  # prepare second output line
+  LINE="${OUTPUT[1]}"
+  LINE="${LINE#"+++ ${TEMPFILE2}"}"
+  if [[ "${FILE2}" == "/dev/null" || ! -f "${FILE2}" ]]
+  then
+    OUTPUT[1]="+++ /dev/null"
+  else
+    OUTPUT[1]="+++ b/${FILENAME}"
+  fi
+
+  for LINE in "${OUTPUT[@]}"
+  do
+    echo "$LINE"
+  done
+fi
+
+# set the exit code
+exit "${EXITCODE}"

@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
 
-# prepare the exit code
-EXITCODE="0"
-
 # set a default for the armoring if none is given
 if [[ -z "${V02ENC_ARMOR}" ]]
 then
@@ -16,6 +13,9 @@ then
 fi
 
 SCRIPT_DIR=$(dirname $(realpath "$0"))
+
+# prepare the exit code
+EXITCODE="0"
 
 if [[ -f "${V02ENC_KEY}" ]]
 then

@@ -1,7 +1,10 @@
-# 0.2a2 (2024-08-28)
+# 0.2a2 (2024-08-29)
 
 * fix message length check during update
 * prevent fatal errors on empty paths
+* add `v02gitdiff`
+* add `v02hgdiff`
+* extend `README.md` to mention the new wrappers
 
 # 0.2a1 (2024-08-27)
 

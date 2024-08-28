@@ -2,6 +2,26 @@
 
 `v02enc` is a password-based encryption application that supports several recipients and has the option to update an encrypted file as long as the user has access to the password of a single recipient.
 
+`v02gitdiff` is a small script that requires `colordiff` to work. It can be used to enhance the `git diff` output by adding the following configuration to `~/.gitconfig`:
+
+```
+[diff]
+external = /full/path/to/v02gitdiff
+```
+
+`v02hgdiff` is a small script that requires `colordiff` to work. It can be used to enhance the `hg diff` output by adding the following configuration to `~/.hgrc`:
+
+```
+[extensions]
+extdiff =
+
+[extdiff]
+cmd.v02hgdiff = /full/path/to/v02hgdiff
+
+[alias]
+diff = !for FILE in $(hg status -n) ; do hg v02hgdiff "$(hg root)/${FILE}" -o "$(hg root)" ; done
+```
+
 `vim02enc` is a small script that enables a user to transparently edit a `v02enc`-encrypted file. After closing the file, it will be encrypted for all former recipients.
 
 ## Help
