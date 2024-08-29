@@ -35,12 +35,24 @@ then
       # decrypt the first file
       "${SCRIPT_DIR}/v02enc" --decrypt --key "${V02ENC_KEY}" --input "${FILE1}" --output "${TEMPFILE1}" 2>/dev/null
 
+      if [[ "$?" -eq "0" ]]
+      then
+        # set restrictive temporary file access
+        chmod 600 "${TEMPFILE1}"
+      fi
+
       # decrypt the second file
       "${SCRIPT_DIR}/v02enc" --decrypt --key "${V02ENC_KEY}" --input "${FILE2}" --output "${TEMPFILE2}" 2>/dev/null
 
+      if [[ "$?" -eq "0" ]]
+      then
+        # set restrictive temporary file access
+        chmod 600 "${TEMPFILE2}"
+      fi
+
       # compare decrypted files
       IFS=$'\n' OUTPUT=($(/usr/bin/env diff --color=always -Npu "${TEMPFILE1}" "${TEMPFILE2}" | /usr/bin/env colordiff))
-          
+
       # try to delete the temporary file either way
       rm -f "${TEMPFILE1}"
 
