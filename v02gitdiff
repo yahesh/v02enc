@@ -43,7 +43,7 @@ then
 
       # compare decrypted files
       IFS=$'\n' OUTPUT=($(/usr/bin/env diff --color=always -Npu "${TEMPFILE1}" "${TEMPFILE2}" | /usr/bin/env colordiff))
-          
+
       # try to delete the temporary file either way
       rm -f "${TEMPFILE1}"
 
@@ -91,10 +91,7 @@ then
     OUTPUT[1]="+++ b/${FILENAME}"
   fi
 
-  for LINE in "${OUTPUT[@]}"
-  do
-    echo "$LINE"
-  done
+  printf '%s\n' "${OUTPUT[@]}"
 fi
 
 # set the exit code
