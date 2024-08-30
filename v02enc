@@ -31,44 +31,336 @@
 
 ##### DEFINITIONS #####
 
-# define armor parts
-define("ARMOR_FOOTER",  "-----END V02ENC MESSAGE-----");
-define("ARMOR_HEADER",  "-----BEGIN V02ENC MESSAGE-----");
-define("ARMOR_MESSAGE", "message");
-define("ARMOR_REGEX",   "@^(?:[\n\r]*)".ARMOR_HEADER."(?:[\n\r]+)(?<".ARMOR_MESSAGE.">[0-9A-Za-z\+\/\=\n\r]+?)(?:[\n\r]+)".ARMOR_FOOTER."(?:[\n\r]*)$@is");
+# define armor fields
+define("ARMOR_FOOTER", "-----END V02ENC MESSAGE-----");
+define("ARMOR_HEADER", "-----BEGIN V02ENC MESSAGE-----");
+
+# define lengths
+define("AES256_BLOCK_SIZE",  16);
+define("AES256_KEY_SIZE",    32);
+define("ARMOR_RAW_LENGTH",   48);
+define("SHA256_OUTPUT_SIZE", 32);
+define("STREAM_RAW_LENGTH",  ARMOR_RAW_LENGTH*22); // = ~1k blocks
 
 # define encryption fields
-define("CHECKMAC",       "checkmac");
-define("ENCKEY",         "enckey");
-define("ENCMESSAGE",     "encmessage");
-define("FULLMESSAGE",    "fullmessage");
-define("KEY",            "key");
-define("MAC",            "mac");
-define("MACKEY",         "mackey");
-define("MACMESSAGE",     "macmessage");
-define("MESSAGE",        "message");
-define("NEWENCKEY",      "newenckey");
-define("NEWENCMESSAGE",  "newencmessage");
-define("NEWFULLMESSAGE", "newfullmessage");
-define("NEWKEY",         "newkey");
-define("NEWMAC",         "newmac");
-define("NEWMACKEY",      "newmackey");
-define("NEWMACMESSAGE",  "newmacmessage");
-define("NEWMESSAGE",     "newmessage");
-define("NEWNONCE",       "newnonce");
-define("NONCE",          "nonce");
-define("SALT",           "salt");
-define("SUBKEYCOUNT",    "subkeycount");
-define("SUBKEYDERIVED",  "subkeyderived");
-define("SUBKEYMESSAGE",  "subkeykeymessage");
-define("SUBKEYNONCE",    "subkeynonce");
-define("SUBKEYS",        "subkeys");
-define("VERSION",        "version");
+define("CHECKMAC",      "checkmac");
+define("ENCKEY",        "enckey");
+define("HEADER",        "header");
+define("HEADERMAC",     "headermac");
+define("HEADERMACKEY",  "headermackey");
+define("HEADERNONCE",   "headernonce");
+define("HEADERSALT",    "headersalt");
+define("KEY",           "key");
+define("MESSAGE",       "message");
+define("MESSAGEMAC",    "messagemac");
+define("MESSAGEMACKEY", "messagemackey");
+define("MESSAGENONCE",  "messagenonce");
+define("SUBKEY",        "subkey");
+define("SUBKEYCOUNT",   "subkeycount");
+define("SUBKEYHEADER",  "subkeykeyheader");
+define("SUBKEYLIST",    "subkeylist");
+define("VERSION",       "version");
 
-##### ARMOR FUNCTIONS #####
+# define stream fields
+define("ARMOR",  "armor");
+define("BUFFER", "buffer");
+define("EOF",    "eof");
+define("NAME",   "name");
+define("STREAM", "stream");
 
-function armor($message) {
-  return ARMOR_HEADER."\n".chunk_split(base64_encode($message), 64, "\n").ARMOR_FOOTER;
+##### GLOBAL VARIABLES #####
+
+$__INPUTS  = [];
+$__OUTPUTS = [];
+
+##### INPUT/OUTPUT FUNCTIONS #####
+
+function input_dearmor($name) {
+  global $__INPUTS;
+
+  $result = false;
+
+  if (is_string($name)) {
+    if (array_key_exists($name, $__INPUTS)) {
+      # read the first bytes to check if the input is armored
+      $tmp = fread($__INPUTS[$name][STREAM], strlen(ARMOR_HEADER));
+      if (false !== $tmp) {
+        $__INPUTS[$name][ARMOR] = (0 === strcmp($tmp, ARMOR_HEADER));
+        if (!$__INPUTS[$name][ARMOR]) {
+          # put the read bytes in the input buffer
+          $__INPUTS[$name][BUFFER] = $tmp;
+        }
+      }
+
+      $result = true;
+    }
+  }
+
+  return $result;
+}
+
+function input_eof($name) {
+  global $__INPUTS;
+
+  $result = false;
+
+  if (is_string($name)) {
+    if (array_key_exists($name, $__INPUTS)) {
+      # only read the value directly from the file if it isn't set internally
+      if (!$__INPUTS[$name][EOF]) {
+        $__INPUTS[$name][EOF] = feof($__INPUTS[$name][STREAM]);
+      }
+
+      $result = $__INPUTS[$name][EOF];
+    }
+  }
+
+  return $result;
+}
+
+function input_finit($name) {
+  global $__INPUTS;
+
+  $result = false;
+
+  if (is_string($name)) {
+    if (array_key_exists($name, $__INPUTS)) {
+      # clean-up leftovers
+      $__INPUTS[$name][BUFFER] = "";
+
+      unset($__INPUTS[$name]);
+
+      $result = true;
+    }
+  }
+
+  return $result;
+}
+
+function input_init($name, $stream) {
+  global $__INPUTS;
+
+  $result = false;
+
+  if (is_string($name) && is_resource($stream)) {
+    if (!array_key_exists($name, $__INPUTS)) {
+      $__INPUTS[$name] = [ARMOR  => false,
+                          BUFFER => "",
+                          EOF    => false,
+                          NAME   => $name,
+                          STREAM => $stream];
+
+      $result = true;
+    }
+  }
+
+  return $result;
+}
+
+function input_read($name, $length) {
+  global $__INPUTS;
+
+  $result = false;
+
+  if (is_string($name) && is_int($length)) {
+    if (array_key_exists($name, $__INPUTS)) {
+      $result = "";
+
+      # clean-up the input buffer first
+      if (0 < strlen($__INPUTS[$name][BUFFER])) {
+        $result = substr($__INPUTS[$name][BUFFER], 0, $length);
+
+        # remove bytes from the input buffer
+        $__INPUTS[$name][BUFFER] = substr($__INPUTS[$name][BUFFER], $length);
+      }
+
+      if (strlen($result) < $length) {
+        $tmp = false;
+
+        if ($__INPUTS[$name][ARMOR]) {
+          while (!feof($__INPUTS[$name][STREAM]) && (strlen($result) < $length) && (false !== $result)) {
+            # read next line
+            $tmp = fgets($__INPUTS[$name][STREAM]);
+            if (false !== $tmp) {
+              # remove line breaks from the end of the line
+              $tmp = rtrim($tmp, "\n\r");
+
+              # check if we found the armor footer
+              if (0 === strcmp($tmp, ARMOR_FOOTER)) {
+                # set the input to end-of-file
+                $__INPUTS[$name][EOF] = true;
+
+                # break the loop
+                break;
+              } else {
+                # decode the line
+                $tmp = base64_decode($tmp, true);
+                if (false !== $tmp) {
+                  # the new block is enough to reach the $length
+                  if (strlen($result)+strlen($tmp) >= $length) {
+                    # how many bytes to take from the new block
+                    $count = $length-strlen($result);
+
+                    # write bytes to result
+                    $result .= substr($tmp, 0, $count);
+
+                    # update the input buffer
+                    $__INPUTS[$name][BUFFER] = substr($tmp, $count);
+                  } else {
+                    $result .= $tmp;
+                  }
+                } else {
+                  # decode errors have priority
+                  $result = false;
+                }
+              }
+            } else {
+              # read errors have priority
+              $result = false;
+            }
+          }
+        } else {
+          # just read the data
+          $tmp = fread($__INPUTS[$name][STREAM], $length-strlen($result));
+
+          if (false !== $tmp) {
+            $result .= $tmp;
+          } else {
+            # read errors have priority
+            $result = false;
+          }
+        }
+      }
+    }
+  }
+
+  return $result;
+}
+
+function input_read_collect($name, $length, &$collection) {
+  $result = input_read($name, $length);
+
+  # if we have returned data, append to $collection
+  if (is_string($result)) {
+    $collection .= $result;
+  }
+
+  return $result;
+}
+
+function output_armor($name) {
+  global $__OUTPUTS;
+
+  $result = false;
+
+  if (is_string($name)) {
+    if (array_key_exists($name, $__OUTPUTS)) {
+      $__OUTPUTS[$name][ARMOR] = true;
+
+      # write armor header
+      $result = (strlen(ARMOR_HEADER)+1 === fwrite($__OUTPUTS[$name][STREAM], ARMOR_HEADER."\n"));
+    }
+  }
+
+  return $result;
+}
+
+function output_finit($name) {
+  global $__OUTPUTS;
+
+  $result = false;
+
+  if (is_string($name)) {
+    if (array_key_exists($name, $__OUTPUTS)) {
+      $result = true;
+
+      if ($__OUTPUTS[$name][ARMOR]) {
+        # write rest of the output buffer
+        $tmp     = base64_encode($__OUTPUTS[$name][BUFFER]);
+        $result &= (strlen($tmp) === fwrite($__OUTPUTS[$name][STREAM], $tmp));
+
+        # write armor footer
+        $result &= (strlen(ARMOR_FOOTER)+1 === fwrite($__OUTPUTS[$name][STREAM], "\n".ARMOR_FOOTER));
+
+        # clean-up leftovers
+        $__OUTPUTS[$name][BUFFER] = "";
+      }
+
+      if ($result) {
+        unset($__OUTPUTS[$name]);
+      }
+    }
+  }
+
+  return $result;
+}
+
+function output_init($name, $stream) {
+  global $__OUTPUTS;
+
+  $result = false;
+
+  if (is_string($name) && is_resource($stream)) {
+    if (!array_key_exists($name, $__OUTPUTS)) {
+      $__OUTPUTS[$name] = [ARMOR  => false,
+                           BUFFER => "",
+                           NAME   => $name,
+                           STREAM => $stream];
+
+      $result = true;
+    }
+  }
+
+  return $result;
+}
+
+function output_write($name, $data) {
+  global $__OUTPUTS;
+
+  $result = false;
+
+  if (is_string($name) && is_string($data)) {
+    if (array_key_exists($name, $__OUTPUTS)) {
+      if ($__OUTPUTS[$name][ARMOR]) {
+        # prepare result
+        $result = true;
+
+        # prepend the current output buffer to the data
+        $data = $__OUTPUTS[$name][BUFFER].$data;
+
+        # prepare Base64 encoding
+        $position = 0;
+
+        # split data into chunks to Base64-encode and write them
+        while (strlen($data)-$position >= ARMOR_RAW_LENGTH) {
+          $tmp     = base64_encode(substr($data, $position, ARMOR_RAW_LENGTH));
+          $result &= (strlen($tmp)+1 === fwrite($__OUTPUTS[$name][STREAM], "{$tmp}\n"));
+
+          # increase the position
+          if ($result) {
+            $position = $position+ARMOR_RAW_LENGTH;
+          } else {
+            # exit the loop
+            break;
+          }
+        }
+
+        # proceed if nothing went wrong
+        if ($result) {
+          # put rest of the data in write buffer
+          $__OUTPUTS[$name][BUFFER] = substr($data, $position);
+        } else  {
+          # clean-up leftovers
+          $__OUTPUTS[$name][BUFFER] = "";
+        }
+      } else {
+        # just write the data
+        $result = (strlen($data) === fwrite($__OUTPUTS[$name][STREAM], $data));
+      }
+    }
+  }
+
+  return $result;
 }
 
 function dearmor($message) {
@@ -88,109 +380,110 @@ function dearmor($message) {
 
 ##### CRYPTOGRAPHIC FUNCTIONS #####
 
-function decrypt_v02($message, $recipients, &$error) {
+# TODO: chr() and ord() are not time-constant
+function increment($counter, $increment = 0x01) {
+  $result = $counter;
+
+  if (is_string($result)   &&
+      (0x00 <= $increment) &&
+      (0xFF >= $increment)) {
+    # add increment to the result
+    for ($index = strlen($result)-0x01; $index >= 0x00; $index--) {
+      $tmp            = (((ord($result[$index]) + $increment) >> 0x08) & 0xFF);
+      $result[$index] = chr((ord($result[$index]) + $increment) & 0xFF);
+      $increment      = $tmp;
+    }
+  }
+
+  return $result;
+}
+
+# reusable header decryption
+function decrypt_header($input, $recipients, &$data, &$error) {
   $result = false;
   $error  = false;
 
-  if (is_string($message) && is_array($recipients)) {
-    # allow empty messages
-    if (131 <= strlen($message)) {
-      if (0 < count($recipients)) {
-        $data = [];
+  if (is_string($input) && is_array($recipients) && is_array($data)) {
+    if (0 < count($recipients)) {
+      # prepare MAC comparison
+      $data[HEADER] = "";
 
-        try {
-          # prepare raw message
-          $data[FULLMESSAGE] = $message;
+      $data[VERSION]      = input_read_collect($input, 1,                 $data[HEADER]);
+      $data[HEADERSALT]   = input_read_collect($input, AES256_KEY_SIZE,   $data[HEADER]);
+      $data[HEADERNONCE]  = input_read_collect($input, AES256_BLOCK_SIZE, $data[HEADER]);
+      $data[MESSAGENONCE] = input_read_collect($input, AES256_BLOCK_SIZE, $data[HEADER]);
 
-          # parse message
-          $data[MACMESSAGE] = substr($data[FULLMESSAGE],   0, -32);
-          $data[MAC]        = substr($data[FULLMESSAGE], -32);
+      $data[SUBKEYCOUNT] = hexdec(bin2hex(input_read_collect($input, 2, $data[HEADER])));
+      $data[SUBKEYLIST]  = [];
 
-          $data[VERSION]     = substr($data[MACMESSAGE], 0,     1);
-          $data[SALT]        = substr($data[MACMESSAGE], 1,    32);
-          $data[SUBKEYNONCE] = substr($data[MACMESSAGE], 1+32, 16);
+      # iterate through the subkeys
+      for ($i = 0; $i < $data[SUBKEYCOUNT]; $i++) {
+        $data[SUBKEYLIST][$i]               = [];
+        $data[SUBKEYLIST][$i][CHECKMAC]     = [];
+        $data[SUBKEYLIST][$i][ENCKEY]       = [];
+        $data[SUBKEYLIST][$i][KEY]          = [];
+        $data[SUBKEYLIST][$i][HEADERMACKEY] = [];
+        $data[SUBKEYLIST][$i][SUBKEY]       = [];
+        $data[SUBKEYLIST][$i][SUBKEYHEADER] = input_read_collect($input, AES256_KEY_SIZE, $data[HEADER]);
+      }
 
-          $data[SUBKEYCOUNT] = hexdec(bin2hex(substr($data[MACMESSAGE], 1+32+16, 2)));
-          $data[SUBKEYS]     = [];
+      # do not add the header mac to the overall header
+      $data[HEADERMAC] = input_read($input, SHA256_OUTPUT_SIZE);
 
-          # iterate through the subkeys
-          $position = 1+32+16+2;
-          for ($i = 0; $i < $data[SUBKEYCOUNT]; $i++) {
-            $data[SUBKEYS][$i]                = [];
-            $data[SUBKEYS][$i][CHECKMAC]      = [];
-            $data[SUBKEYS][$i][ENCKEY]        = [];
-            $data[SUBKEYS][$i][KEY]           = [];
-            $data[SUBKEYS][$i][MACKEY]        = [];
-            $data[SUBKEYS][$i][SUBKEYDERIVED] = [];
-            $data[SUBKEYS][$i][SUBKEYMESSAGE] = substr($data[MACMESSAGE], $position, 32);
+      if ("\x02" === $data[VERSION]) {
+        # set default key value
+        $data[KEY] = false;
 
-            # update position of next entry
-            $position = $position+32;
-          }
+        # iterate through the recipients and see whether we find a fitting key
+        $keys    = array_keys($recipients);
+        $subkeys = array_keys($data[SUBKEYLIST]);
+        foreach ($subkeys as $subkey) {
+          foreach ($keys as $key) {
+            # derive secure key from recipient key and salt
+            $data[SUBKEYLIST][$subkey][SUBKEY][$key] = hash_pbkdf2("sha256", $recipients[$key], $data[HEADERSALT], 512000, 0, true);
 
-          $data[NONCE]      = substr($data[MACMESSAGE], $position, 16);
-          $data[ENCMESSAGE] = substr($data[MACMESSAGE], $position+16);
+            if (false !== $data[SUBKEYLIST][$subkey][SUBKEY][$key]) {
+              # decrypt subkey with derived secure key
+              $data[SUBKEYLIST][$subkey][KEY][$key] = openssl_decrypt($data[SUBKEYLIST][$subkey][SUBKEYHEADER], "aes-256-ctr", $data[SUBKEYLIST][$subkey][SUBKEY][$key], OPENSSL_RAW_DATA | OPENSSL_ZERO_PADDING, $data[HEADERNONCE]);
 
-          if ("\x02" === $data[VERSION]) {
-            # set default encryption key value
-            $data[ENCKEY] = false;
+              if (false !== $data[SUBKEYLIST][$subkey][KEY][$key]) {
+                # generate mac keys
+                $data[SUBKEYLIST][$subkey][HEADERMACKEY][$key] = hash_hmac("sha256", "mac-header", $data[SUBKEYLIST][$subkey][KEY][$key], true);
 
-            # iterate through the recipients and see whether we find a fitting key
-            $keys = array_keys($recipients);
-            $subkeys = array_keys($data[SUBKEYS]);
-            foreach ($subkeys as $subkey) {
-              foreach ($keys as $key) {
-                # derive secure key from recipient key and salt
-                $data[SUBKEYS][$subkey][SUBKEYDERIVED][$key] = hash_pbkdf2("sha256", $recipients[$key], $data[SALT], 512000, 0, true);
+                if (false !== $data[SUBKEYLIST][$subkey][HEADERMACKEY][$key]) {
+                  # calculate header mac with header mac key
+                  $data[SUBKEYLIST][$subkey][CHECKMAC][$key] = hash_hmac("sha256", $data[HEADER], $data[SUBKEYLIST][$subkey][HEADERMACKEY][$key], true);
 
-                if (false !== $data[SUBKEYS][$subkey][SUBKEYDERIVED][$key]) {
-                  # decrypt subkey with derived secure key
-                  $data[SUBKEYS][$subkey][KEY][$key] = openssl_decrypt($data[SUBKEYS][$subkey][SUBKEYMESSAGE], "aes-256-ctr", $data[SUBKEYS][$subkey][SUBKEYDERIVED][$key], OPENSSL_RAW_DATA | OPENSSL_ZERO_PADDING, $data[SUBKEYNONCE]);
-
-                  if (false !== $data[SUBKEYS][$subkey][KEY][$key]) {
-                    # generate MAC key
-                    $data[SUBKEYS][$subkey][MACKEY][$key] = hash_hmac("sha256", "mac", $data[SUBKEYS][$subkey][KEY][$key], true);
-
-                    if (false !== $data[SUBKEYS][$subkey][MACKEY][$key]) {
-                      # calculate MAC with mac key
-                      $data[SUBKEYS][$subkey][CHECKMAC][$key] = hash_hmac("sha256", $data[MACMESSAGE], $data[SUBKEYS][$subkey][MACKEY][$key], true);
-
-                      if (false !== $data[SUBKEYS][$subkey][CHECKMAC][$key]) {
-                        if (hash_equals($data[SUBKEYS][$subkey][CHECKMAC][$key], $data[MAC])) {
-                          # generate encryption key
-                          $data[ENCKEY] = hash_hmac("sha256", "enc", $data[SUBKEYS][$subkey][KEY][$key], true);
-                        }
-                      }
+                  if (false !== $data[SUBKEYLIST][$subkey][CHECKMAC][$key]) {
+                    if (hash_equals($data[SUBKEYLIST][$subkey][CHECKMAC][$key], $data[HEADERMAC])) {
+                      # generate encryption key
+                      $data[KEY] = $data[SUBKEYLIST][$subkey][KEY][$key];
                     }
                   }
                 }
               }
             }
-
-            if (false !== $data[ENCKEY]) {
-              # decrypt message with enccryption key
-              $data[MESSAGE] = openssl_decrypt($data[ENCMESSAGE], "aes-256-ctr", $data[ENCKEY], OPENSSL_RAW_DATA | OPENSSL_ZERO_PADDING, $data[NONCE]);
-
-              if (false !== $data[MESSAGE]) {
-                # set result value
-                $result = $data[MESSAGE];
-              } else {
-                $error = "Message decryption failed.";
-              }
-            } else {
-              $error = "No matching recipient provided.";
-            }
-          } else {
-            $error = "Message has wrong version.";
           }
-        } finally {
-          zeroize_array($data);
         }
-      } else {
-        $error = "No recipients provided.";
+
+        if (false !== $data[KEY]) {
+          $data[ENCKEY]        = hash_hmac("sha256", "enc",         $data[KEY], true); // generate enc key
+          $data[HEADERMACKEY]  = hash_hmac("sha256", "mac-header" , $data[KEY], true); // generate mac key
+          $data[MESSAGEMACKEY] = hash_hmac("sha256", "mac-message", $data[KEY], true); // generate mac key
+
+          if ((false !== $data[ENCKEY]) && (false !== $data[MESSAGEMACKEY]) && (false !== $data[MESSAGEMACKEY])) {
+            $result = true;
+          } else {
+            $error = "Key expansion failed.";
+          }
+        } else {
+          $error = "No matching recipient provided.";
+        }
+      } else  {
+        $error = "Message has wrong version.";
       }
     } else {
-      $error = "Message has wrong length.";
+      $error = "No recipients provided.";
     }
   } else {
     $error = "Insufficient arguments provided.";
@@ -199,47 +492,273 @@ function decrypt_v02($message, $recipients, &$error) {
   return $result;
 }
 
-function encrypt_v02($message, $recipients, &$error) {
+# reusable message decryption
+function decrypt_message($input, $output, &$data, &$error) {
   $result = false;
   $error  = false;
 
-  if (is_string($message) && is_array($recipients)) {
+  if (is_string($input) && is_string($output) && is_array($data)) {
+    # prepare message hmac
+    if ($checkmac = hash_init("sha256", HASH_HMAC, $data[MESSAGEMACKEY])) {
+      hash_update($checkmac, $data[HEADER]);
+      hash_update($checkmac, $data[HEADERMAC]);
+
+      # prepare streamed message encryption
+      $buffer  = "";
+      $counter = $data[MESSAGENONCE];
+      while (!input_eof($input) && (false === $error)) {
+        # we read a straight number of ARMOR_RAW_LENGTH blocks to
+        # optimize the output buffering behaviour while making sure
+        # that the buffer length aligns with the AES block size
+        $tmp = input_read($input, STREAM_RAW_LENGTH);
+        if (false !== $tmp) {
+          # add read string to buffer
+          $buffer .= $tmp;
+
+          # get number of AES blocks,
+          # keep 32 bytes at the end for a potential message mac
+          $blocks = 0;
+          if (SHA256_OUTPUT_SIZE < strlen($buffer)) {
+            $blocks = intdiv(strlen($buffer)-SHA256_OUTPUT_SIZE, AES256_BLOCK_SIZE);
+          }
+
+          if (0 < $blocks) {
+            # decrypt full block lengths
+            $tmp = openssl_decrypt(substr($buffer, 0, $blocks*AES256_BLOCK_SIZE), "aes-256-ctr", $data[ENCKEY], OPENSSL_RAW_DATA | OPENSSL_ZERO_PADDING, $counter);
+            if (false !== $tmp) {
+              hash_update($checkmac, substr($buffer, 0, $blocks*AES256_BLOCK_SIZE));
+
+              # increment the counter for the next round
+              $counter = increment($counter, $blocks);
+
+              if (output_write($output, $tmp)) {
+                $buffer = substr($buffer, $blocks*AES256_BLOCK_SIZE);
+              } else {
+                $error = "Message could not be written to output.";
+              }
+            } else {
+              $error = "Message decryption failed.";
+            }
+          }
+        } else {
+          $error = "Message could not be read from input.";
+        }
+      }
+
+      # handle the rest of the buffer
+      if (false === $error) {
+        # get the message mac
+        $data[MESSAGEMAC] = substr($buffer, -SHA256_OUTPUT_SIZE);
+
+        # prepare the buffer for the last round
+        $buffer = substr($buffer, 0, -SHA256_OUTPUT_SIZE);
+
+        # decrypt what's left
+        $tmp = openssl_decrypt($buffer, "aes-256-ctr", $data[ENCKEY], OPENSSL_RAW_DATA | OPENSSL_ZERO_PADDING, $counter);
+        if (false !== $tmp) {
+          hash_update($checkmac, $buffer);
+
+          if (!output_write($output, $tmp)) {
+            $error = "Message could not be written to output.";
+          }
+        } else {
+          $error = "Message decryption failed.";
+        }
+      }
+
+      if (false === $error) {
+        # calculate message mac with message mac key
+        $data[CHECKMAC] = hash_final($checkmac, true);
+
+        $result = hash_equals($data[CHECKMAC], $data[MESSAGEMAC]);
+        if (!$result) {
+          $error = "Message MAC does not belong to message.";
+        }
+      } else {
+        # keep the error message of the loop
+      }
+    } else {
+      $error = "Message HMAC could not be initialized.";
+    }
+  } else {
+    $error = "Insufficient arguments provided.";
+  }
+
+  return $result;
+}
+
+# reusable message encryption
+function encrypt_message($input, $output, &$data, &$error) {
+  $result = false;
+  $error  = false;
+
+  if (is_string($input) && is_string($output) && is_array($data)) {
+    # concatenate the header
+    $data[HEADER]  = $data[VERSION];
+    $data[HEADER] .= $data[HEADERSALT];
+    $data[HEADER] .= $data[HEADERNONCE];
+    $data[HEADER] .= $data[MESSAGENONCE];
+    $data[HEADER] .= hex2bin(sprintf("%04x", $data[SUBKEYCOUNT]));
+
+    $keys = array_keys($data[SUBKEYHEADER]);
+    foreach ($keys as $key) {
+      $data[HEADER] .= $data[SUBKEYHEADER][$key];
+    }
+
+    # calculate the header mac with the header mac key
+    $data[HEADERMAC] = hash_hmac("sha256", $data[HEADER], $data[HEADERMACKEY], true);
+
+    if (false !== $data[HEADERMAC]) {
+      # write header to output
+      if (output_write($output, $data[HEADER].$data[HEADERMAC])) {
+        # prepare message hmac
+        if ($messagemac = hash_init("sha256", HASH_HMAC, $data[MESSAGEMACKEY])) {
+          hash_update($messagemac, $data[HEADER]);
+          hash_update($messagemac, $data[HEADERMAC]);
+
+          # prepare streamed message encryption
+          $buffer  = "";
+          $counter = $data[MESSAGENONCE];
+          while (!input_eof($input) && (false === $error)) {
+            # we read a straight number of ARMOR_RAW_LENGTH blocks to
+            # optimize the output buffering behaviour while making sure
+            # that the buffer length aligns with the AES block size
+            $tmp = input_read($input, STREAM_RAW_LENGTH);
+            if (false !== $tmp) {
+              # add read string to buffer
+              $buffer .= $tmp;
+
+              # get number of AES blocks
+              $blocks = intdiv(strlen($buffer), AES256_BLOCK_SIZE);
+
+              if (0 < $blocks) {
+                # encrypt full block lengths
+                $tmp = openssl_encrypt(substr($buffer, 0, $blocks*AES256_BLOCK_SIZE), "aes-256-ctr", $data[ENCKEY], OPENSSL_RAW_DATA | OPENSSL_ZERO_PADDING, $counter);
+                if (false !== $tmp) {
+                  hash_update($messagemac, $tmp);
+
+                  # increment the counter for the next round
+                  $counter = increment($counter, $blocks);
+
+                  if (output_write($output, $tmp)) {
+                    $buffer = substr($buffer, $blocks*AES256_BLOCK_SIZE);
+                  } else {
+                    $error = "Message could not be written to output.";
+                  }
+                } else {
+                  $error = "Message encryption failed.";
+                }
+              }
+            } else {
+              $error = "Message could not be read from input.";
+            }
+          }
+
+          # handle the rest of the buffer
+          if (false === $error) {
+            # encrypt what's left
+            $tmp = openssl_encrypt($buffer, "aes-256-ctr", $data[ENCKEY], OPENSSL_RAW_DATA | OPENSSL_ZERO_PADDING, $counter);
+            if (false !== $tmp) {
+              hash_update($messagemac, $tmp);
+
+              if (output_write($output, $tmp)) {
+                # calculate message mac with message mac key
+                $data[MESSAGEMAC] = hash_final($messagemac, true);
+
+                $result = output_write($output, $data[MESSAGEMAC]);
+                if (!$result) {
+                  $error = "Message could not be written to output.";
+                }
+              } else {
+                $error = "Message could not be written to output.";
+              }
+            } else {
+              $error = "Message encryption failed.";
+            }
+          }
+        } else {
+          $error = "Message HMAC could not be initialized.";
+        }
+      } else {
+        $error = "Header could not be written to output.";
+      }
+    } else {
+      $error = "Header MAC calculation failed.";
+    }
+  } else {
+    $error = "Insufficient arguments provided.";
+  }
+
+  return $result;
+}
+
+function decrypt_v02($input, $output, $recipients, &$error) {
+  $result = false;
+  $error  = false;
+
+  if (is_string($input) && is_string($output)) {
+    $data = [];
+
+    try {
+      if (decrypt_header($input, $recipients, $data, $error)) {
+        $result = decrypt_message($input, $output, $data, $error);
+        if (!$result) {
+          # keep the error text from decrypt_message()
+        }
+      } else {
+        # keep the error text from decrypt_header()
+      }
+    } finally {
+      zeroize_array($data);
+    }
+  } else {
+    $error = "Insufficient arguments provided.";
+  }
+
+  return $result;
+}
+
+function encrypt_v02($input, $output, $recipients, &$error) {
+  $result = false;
+  $error  = false;
+
+  if (is_string($input) && is_string($output) && is_array($recipients)) {
     if (0xFFFF >= count($recipients)) {
       if (0 < count($recipients)) {
         $data = [];
 
         try {
           # set and generate values
-          $data[VERSION] = "\x02";
-          $data[KEY]     = openssl_random_pseudo_bytes(32, $strong_crypto_key); // generate random key
-          $data[MESSAGE] = $message;
-          $data[SALT]    = openssl_random_pseudo_bytes(32, $strong_crypto_salt); // generate random salt
+          $data[VERSION]    = "\x02";
+          $data[HEADERSALT] = openssl_random_pseudo_bytes(AES256_KEY_SIZE, $strong_crypto_headersalt); // generate random salt
+          $data[KEY]        = openssl_random_pseudo_bytes(AES256_KEY_SIZE, $strong_crypto_key);        // generate random key
 
-          if ((false !== $data[KEY]) && (false !== $data[SALT]) && $strong_crypto_key && $strong_crypto_salt) {
-            $data[ENCKEY] = hash_hmac("sha256", "enc", $data[KEY], true); // generate enc key
-            $data[MACKEY] = hash_hmac("sha256", "mac", $data[KEY], true); // generate mac key
+          if ((false !== $data[HEADERSALT]) && (false !== $data[KEY]) && $strong_crypto_headersalt && $strong_crypto_key) {
+            $data[ENCKEY]        = hash_hmac("sha256", "enc",         $data[KEY], true); // generate enc key
+            $data[HEADERMACKEY]  = hash_hmac("sha256", "mac-header",  $data[KEY], true); // generate mac key
+            $data[MESSAGEMACKEY] = hash_hmac("sha256", "mac-message", $data[KEY], true); // generate mac key
 
-            if ((false !== $data[ENCKEY]) && (false !== $data[MACKEY])) {
+            if ((false !== $data[ENCKEY]) && (false !== $data[HEADERMACKEY]) && (false !== $data[MESSAGEMACKEY])) {
               # use the same time for both nonces
               $time = time();
 
-              $data[NONCE]       = hex2bin(sprintf("%016x0000000000000000", $time)); // generate nonce
-              $data[SUBKEYNONCE] = hex2bin(sprintf("%016xFFFFFFFF00000000", $time)); // generate nonce
+              $data[HEADERNONCE]  = hex2bin(sprintf("%016xFFFFFFFF00000000", $time)); // generate nonce
+              $data[MESSAGENONCE] = hex2bin(sprintf("%016x0000000000000000", $time)); // generate nonce
 
-              if ((false !== $data[NONCE]) && (false !== $data[SUBKEYNONCE])) {
+              if ((false !== $data[HEADERNONCE]) && (false !== $data[MESSAGENONCE])) {
                 # iterate through recipients and generate rsa keys
-                $data[SUBKEYCOUNT]   = 0;
-                $data[SUBKEYDERIVED] = [];
-                $data[SUBKEYMESSAGE] = [];
+                $data[SUBKEY]       = [];
+                $data[SUBKEYCOUNT]  = 0;
+                $data[SUBKEYHEADER] = [];
 
                 $keys = array_keys($recipients);
                 foreach ($keys as $key) {
-                  $data[SUBKEYDERIVED][$key] = hash_pbkdf2("sha256", $recipients[$key], $data[SALT], 512000, 0, true);
+                  $data[SUBKEY][$key] = hash_pbkdf2("sha256", $recipients[$key], $data[HEADERSALT], 512000, 0, true);
 
-                  if (false !== $data[SUBKEYDERIVED][$key]) {
-                    $data[SUBKEYMESSAGE][$key] = openssl_encrypt($data[KEY], "aes-256-ctr", $data[SUBKEYDERIVED][$key], OPENSSL_RAW_DATA | OPENSSL_ZERO_PADDING, $data[SUBKEYNONCE]);
+                  if (false !== $data[SUBKEY][$key]) {
+                    $data[SUBKEYHEADER][$key] = openssl_encrypt($data[KEY], "aes-256-ctr", $data[SUBKEY][$key], OPENSSL_RAW_DATA | OPENSSL_ZERO_PADDING, $data[HEADERNONCE]);
 
-                    if (false !== $data[SUBKEYMESSAGE][$key]) {
+                    if (false !== $data[SUBKEYHEADER][$key]) {
                       $data[SUBKEYCOUNT] = $data[SUBKEYCOUNT]+1;
                     }
                   }
@@ -247,39 +766,9 @@ function encrypt_v02($message, $recipients, &$error) {
 
                 # check if we were able to encrypt for all recipients
                 if (count($recipients) === $data[SUBKEYCOUNT]) {
-                  # encrypt message with enc key
-                  $data[ENCMESSAGE] = openssl_encrypt($data[MESSAGE], "aes-256-ctr", $data[ENCKEY], OPENSSL_RAW_DATA | OPENSSL_ZERO_PADDING, $data[NONCE]);
-
-                  if (false !== $data[ENCMESSAGE]) {
-                    # concatenate the mac message
-                    $data[MACMESSAGE]  = $data[VERSION];
-                    $data[MACMESSAGE] .= $data[SALT];
-                    $data[MACMESSAGE] .= $data[SUBKEYNONCE];
-                    $data[MACMESSAGE] .= hex2bin(sprintf("%04x", $data[SUBKEYCOUNT]));
-
-                    $keys = array_keys($recipients);
-                    foreach ($keys as $key) {
-                      $data[MACMESSAGE] .= $data[SUBKEYMESSAGE][$key];
-                    }
-
-                    $data[MACMESSAGE] .= $data[NONCE];
-                    $data[MACMESSAGE] .= $data[ENCMESSAGE];
-
-                    # calculate MAC with mac key
-                    $data[MAC] = hash_hmac("sha256", $data[MACMESSAGE], $data[MACKEY], true);
-
-                    if (false !== $data[MAC]) {
-                      # concatenate the full message
-                      $data[FULLMESSAGE]  = $data[MACMESSAGE];
-                      $data[FULLMESSAGE] .= $data[MAC];
-
-                      # set result value
-                      $result = $data[FULLMESSAGE];
-                    } else {
-                      $error = "MAC calculation failed.";
-                    }
-                  } else {
-                    $error = "Message encryption failed.";
+                  $result = encrypt_message($input, $output, $data, $error);
+                  if (!$result) {
+                    # keep the error text from encrypt_message()
                   }
                 } else {
                   $error = "Key encryption failed.";
@@ -309,149 +798,54 @@ function encrypt_v02($message, $recipients, &$error) {
   return $result;
 }
 
-function update_v02($message, $replacement, $recipients, &$error) {
+function update_v02($input, $update, $output, $recipients, &$error) {
   $result = false;
   $error  = false;
 
-  if (is_string($message) && is_string($replacement) && is_array($recipients)) {
-    # allow empty messages
-    if (131 <= strlen($message)) {
-      if (0 < count($recipients)) {
-        $data = [];
+  if (is_string($input) && is_string($update) && is_string($output)) {
+    $data = [];
+
+    try {
+      if (decrypt_header($input, $recipients, $data, $error)) {
+        $newdata = [];
 
         try {
-          # prepare raw message
-          $data[FULLMESSAGE] = $message;
+          # copy values from $data to $newdata to separate decryption from re-encryption
+          $newdata[ENCKEY]        = $data[ENCKEY];
+          $newdata[HEADERMACKEY]  = $data[HEADERMACKEY];
+          $newdata[HEADERNONCE]   = $data[HEADERNONCE];
+          $newdata[HEADERSALT]    = $data[HEADERSALT];
+          $newdata[KEY]           = $data[KEY];
+          $newdata[MESSAGEMACKEY] = $data[MESSAGEMACKEY];
+          $newdata[SUBKEYCOUNT]   = $data[SUBKEYCOUNT];
+          $newdata[SUBKEYHEADER]  = [];
+          $newdata[VERSION]       = $data[VERSION];
 
-          # parse message
-          $data[MACMESSAGE] = substr($data[FULLMESSAGE],   0, -32);
-          $data[MAC]        = substr($data[FULLMESSAGE], -32);
-
-          $data[VERSION]     = substr($data[MACMESSAGE], 0,     1);
-          $data[SALT]        = substr($data[MACMESSAGE], 1,    32);
-          $data[SUBKEYNONCE] = substr($data[MACMESSAGE], 1+32, 16);
-
-          $data[SUBKEYCOUNT] = hexdec(bin2hex(substr($data[MACMESSAGE], 1+32+16,  2)));
-          $data[SUBKEYS]     = [];
-
-          # iterate through the subkeys
-          $position = 1+32+16+2;
-          for ($i = 0; $i < $data[SUBKEYCOUNT]; $i++) {
-            $data[SUBKEYS][$i]                = [];
-            $data[SUBKEYS][$i][CHECKMAC]      = [];
-            $data[SUBKEYS][$i][ENCKEY]        = [];
-            $data[SUBKEYS][$i][KEY]           = [];
-            $data[SUBKEYS][$i][MACKEY]        = [];
-            $data[SUBKEYS][$i][SUBKEYDERIVED] = [];
-            $data[SUBKEYS][$i][SUBKEYMESSAGE] = substr($data[MACMESSAGE], $position, 32);
-
-            # update position of next entry
-            $position = $position+32;
+          # copy the subkey headers from $data to $newdata to separate decryption from re-encryption
+          $keys = array_keys($data[SUBKEYLIST]);
+          foreach ($keys as $key) {
+            $newdata[SUBKEYHEADER][$key] = $data[SUBKEYLIST][$key][SUBKEYHEADER];
           }
 
-          $data[NONCE]      = substr($data[MACMESSAGE], $position, 16);
-          $data[ENCMESSAGE] = substr($data[MACMESSAGE], $position+16);
+          # !!! create a NEW message nonce to prevent nonce reuse
+          $newdata[MESSAGENONCE] = hex2bin(sprintf("%016x0000000000000000", time())); // generate nonce
 
-          if ("\x02" === $data[VERSION]) {
-            # set default encryption key value
-            $data[KEY] = false;
-
-            # iterate through the recipients and see whether we find a fitting key
-            $keys    = array_keys($recipients);
-            $subkeys = array_keys($data[SUBKEYS]);
-            foreach ($subkeys as $subkey) {
-              foreach ($keys as $key) {
-                # derive secure key from recipient key and salt
-                $data[SUBKEYS][$subkey][SUBKEYDERIVED][$key] = hash_pbkdf2("sha256", $recipients[$key], $data[SALT], 512000, 0, true);
-
-                if (false !== $data[SUBKEYS][$subkey][SUBKEYDERIVED][$key]) {
-                  # decrypt subkey with derived secure key
-                  $data[SUBKEYS][$subkey][KEY][$key] = openssl_decrypt($data[SUBKEYS][$subkey][SUBKEYMESSAGE], "aes-256-ctr", $data[SUBKEYS][$subkey][SUBKEYDERIVED][$key], OPENSSL_RAW_DATA | OPENSSL_ZERO_PADDING, $data[SUBKEYNONCE]);
-
-                  if (false !== $data[SUBKEYS][$subkey][KEY][$key]) {
-                    # generate MAC key
-                    $data[SUBKEYS][$subkey][MACKEY][$key] = hash_hmac("sha256", "mac", $data[SUBKEYS][$subkey][KEY][$key], true);
-
-                    if (false !== $data[SUBKEYS][$subkey][MACKEY][$key]) {
-                      # calculate MAC with mac key
-                      $data[SUBKEYS][$subkey][CHECKMAC][$key] = hash_hmac("sha256", $data[MACMESSAGE], $data[SUBKEYS][$subkey][MACKEY][$key], true);
-
-                      if (false !== $data[SUBKEYS][$subkey][CHECKMAC][$key]) {
-                        if (hash_equals($data[SUBKEYS][$subkey][CHECKMAC][$key], $data[MAC])) {
-                          # set the base key
-                          $data[KEY] = $data[SUBKEYS][$subkey][KEY][$key];
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-
-            if (false !== $data[KEY]) {
-              # set and generate values
-              $data[NEWENCKEY]  = hash_hmac("sha256", "enc", $data[KEY], true); // generate enc key
-              $data[NEWMACKEY]  = hash_hmac("sha256", "mac", $data[KEY], true); // generate mac key
-              $data[NEWMESSAGE] = $replacement;
-
-              if ((false !== $data[NEWENCKEY]) && (false !== $data[NEWMACKEY])) {
-                $data[NEWNONCE] = hex2bin(sprintf("%016x0000000000000000", time())); // generate nonce
-
-                if (false !== $data[NEWNONCE]) {
-                  # encrypt message with enc key
-                  $data[NEWENCMESSAGE] = openssl_encrypt($data[NEWMESSAGE], "aes-256-ctr", $data[NEWENCKEY], OPENSSL_RAW_DATA | OPENSSL_ZERO_PADDING, $data[NEWNONCE]);
-
-                  if (false !== $data[NEWENCMESSAGE]) {
-                    # concatenate the mac message
-                    $data[NEWMACMESSAGE]  = $data[VERSION];
-                    $data[NEWMACMESSAGE] .= $data[SALT];
-                    $data[NEWMACMESSAGE] .= $data[SUBKEYNONCE];
-                    $data[NEWMACMESSAGE] .= hex2bin(sprintf("%04x", $data[SUBKEYCOUNT]));
-
-                    $subkeys = array_keys($data[SUBKEYS]);
-                    foreach ($subkeys as $subkey) {
-                      $data[NEWMACMESSAGE] .= $data[SUBKEYS][$subkey][SUBKEYMESSAGE];
-                    }
-
-                    $data[NEWMACMESSAGE] .= $data[NEWNONCE];
-                    $data[NEWMACMESSAGE] .= $data[NEWENCMESSAGE];
-
-                    # calculate MAC with mac key
-                    $data[NEWMAC] = hash_hmac("sha256", $data[NEWMACMESSAGE], $data[NEWMACKEY], true);
-
-                    if (false !== $data[NEWMAC]) {
-                      # concatenate the full message
-                      $data[NEWFULLMESSAGE]  = $data[NEWMACMESSAGE];
-                      $data[NEWFULLMESSAGE] .= $data[NEWMAC];
-
-                      # set result value
-                      $result = $data[NEWFULLMESSAGE];
-                    } else {
-                      $error = "MAC calculation failed.";
-                    }
-                  } else {
-                    $error = "Message encryption failed.";
-                  }
-                } else {
-                  $error = "Nonce generation failed.";
-                }
-              } else {
-                $error = "Key expansion failed.";
-              }
-            } else {
-              $error = "No matching recipient provided.";
+          if (false !== $newdata[MESSAGENONCE]) {
+            $result = encrypt_message($update, $output, $newdata, $error);
+            if (!$result) {
+              # keep the error text from encrypt_message()
             }
           } else {
-            $error = "Message has wrong version.";
+            $error = "Nonce generation failed.";
           }
         } finally {
-          zeroize_array($data);
+          zeroize_array($newdata);
         }
       } else {
-        $error = "No recipients provided.";
+        # keep the error text from decrypt_header()
       }
-    } else {
-      $error = "Message has wrong length.";
+    } finally {
+      zeroize_array($data);
     }
   } else {
     $error = "Insufficient arguments provided.";
@@ -695,7 +1089,7 @@ function print_error($string) {
 }
 
 function print_help() {
-  print("v02enc v0.2a2\n");
+  print("v02enc v0.2b0\n");
   print("\n");
   print("Usage:\n");
   print("\n");
@@ -806,76 +1200,146 @@ function main($arguments) {
 
           # ensure that there is at least one recipient
           if (0 < count($recipients)) {
-            # prepare execution
-            $blob  = false;
-            $error = false;
+            $inputstream = false;
 
-            # load the message
-            if (false === $message) {
-              if (!empty($inputfile)) {
-                $message = file_get_contents($inputfile);
+            if (null === $inputfile) {
+              # write $message into memory stream
+              $inputstream = fopen("php://memory", "rwb");
+              if (false !== $inputstream) {
+                if ((strlen($message) !== fwrite($inputstream, $message)) || !rewind($inputstream)) {
+                  # some error occured
+                  fclose($inputstream);
+                  $inputstream = false;
+                }
               }
+            } else {
+              $inputstream = fopen($inputfile, "rb");
             }
 
-            # check that the message could be loaded
-            if (false !== $message) {
-              if ($decrypt) {
-                # try to dearmor
-                $tmp = dearmor($message);
-                if (false !== $tmp) {
-                  $message = $tmp;
-                }
+            if (false !== $inputstream) {
+              try {
+                if (input_init("input", $inputstream)) {
+                  try {
+                    $outputstream = fopen($outputfile, "wb");
+                    if (false !== $outputstream) {
+                      try {
+                        if (output_init("output", $outputstream)) {
+                          try {
+                            # prepare execution
+                            $success = false;
+                            $error   = "";
 
-                # try to decrypt
-                $blob = decrypt_v02($message, $recipients, $error);
-              } elseif ($encrypt) {
-                # try to encrypt
-                $blob = encrypt_v02($message, $recipients, $error);
+                            if ($decrypt) {
+                              # prepare input dearmoring
+                              if (input_dearmor("input")) {
+                                # try to decrypt
+                                $success = decrypt_v02("input", "output", $recipients, $error);
+                              } else {
+                                $error = "Input could not be dearmored.";
+                              }
+                            } elseif ($encrypt) {
+                              # prepare output armoring
+                              if (!$armor || output_armor("output")) {
+                                # try to encrypt
+                                $success = encrypt_v02("input", "output", $recipients, $error);
+                              } else {
+                                $error = "Output could not be armored.";
+                              }
+                            } elseif (false !== $update) {
+                              # prepare input dearmoring
+                              if (input_dearmor("input")) {
+                                # prepare output armoring
+                                if (!$armor || output_armor("output")) {
+                                  $updatestream = fopen($update, "rb");
+                                  if (false !== $updatestream) {
+                                    try {
+                                      if (input_init("update", $updatestream)) {
+                                        try {
+                                          $success = update_v02("input", "update", "output", $recipients, $error);
+                                        } finally {
+                                          if (!input_finit("update")) {
+                                            $error = "Update could not be finalized.";
+                                          }
+                                        }
+                                      } else {
+                                        $error = "Update could not be initialized.";
+                                      }
+                                    } finally {
+                                      if (!fclose($updatestream)) {
+                                        $error = "Update could not be closed.";
+                                      }
+                                    }
+                                  } else {
+                                    $error = "Update could not be opened";
+                                  }
+                                } else {
+                                  $error = "Output could not be armored.";
+                                }
+                              } else {
+                                $error = "Input could not be dearmored.";
+                              }
+                            }
 
-                # try to armor
-                if ((false !== $blob) && $armor) {
-                  $blob = armor($blob);
-                }
-              } elseif (false !== $update) {
-                # try to dearmor
-                $tmp = dearmor($message);
-                if (false !== $tmp) {
-                  $message = $tmp;
-                }
+                            # ensure that the execution succeeded
+                            if (!$success) {
+                              # print method errors
+                              print_error($error);
+                              $result = 13;
+                            }
+                          } finally {
+                            if (!output_finit("output")) {
+                              print_error("Output could not be finalized.");
 
-                # load the updated message
-                $replacement = false;
-                if (!empty($update)) {
-                  $replacement = file_get_contents($update);
-                }
-                if (false !== $replacement) {
-                  $blob = update_v02($message, $replacement, $recipients, $error);
+                              # only overwrite exit code if it is not set
+                              if (0 === $result) {
+                                $result = 12;
+                              }
+                            }
+                          }
+                        } else {
+                          print_error("Output could not be initialized.");
+                          $result = 11;
+                        }
+                      } finally {
+                        if (!fclose($outputstream)) {
+                          print_error("Output could not be closed.");
 
-                  # try to armor
-                  if ((false !== $blob) && $armor) {
-                    $blob = armor($blob);
+                          # only overwrite exit code if it is not set
+                          if (0 === $result) {
+                            $result = 10;
+                          }
+                        }
+                      }
+                    } else {
+                      print_error("Output could not be opened");
+                      $result = 9;
+                    }
+                  } finally {
+                    if (!input_finit("input")) {
+                      print_error("Input could not be finalized.");
+
+                      # only overwrite exit code if it is not set
+                      if (0 === $result) {
+                        $result = 8;
+                      }
+                    }
                   }
                 } else {
-                  $error = "Update could not be loaded.";
-                }
-              }
-
-              # ensure that the execution succeeded
-              if ((false !== $blob) && (false === $error)) {
-                $success = false;
-                if (!empty($outputfile)) {
-                  $success = file_put_contents($outputfile, $blob);
-                }
-                if (false === $success) {
-                  print_error("Output could not be written.");
+                  print_error("Input could not be initialized.");
                   $result = 7;
                 }
-              } else {
-                print_error($error);
-                $result = 6;
+              } finally {
+                if (!fclose($inputstream)) {
+                  print_error("Input could not be closed.");
+
+                  # only overwrite exit code if it is not set
+                  if (0 === $result) {
+                    $result = 6;
+                  }
+                }
               }
-            } else  {
-              print_error("Message could not be loaded.");
+            } else {
+              print_error("Input could not be opened");
               $result = 5;
             }
           } else {

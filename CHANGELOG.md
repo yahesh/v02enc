@@ -1,3 +1,10 @@
+# 0.2b0 (2024-08-31)
+
+* improve the file structure to support streamed encryption
+* update `ENCRYPTION.md` to reflect the updated file structure
+* introduce streamed encryption
+* deduplicate encryption code
+
 # 0.2a2 (2024-08-29)
 
 * fix message length check during update
@@ -15,9 +22,9 @@
 
 # 0.2a0 (2024-08-25)
 
-* improving the file structure to only use one subkey nonce
-* updating `ENCRYPTION.md` to reflect the updated file structure
-* improving `vim02enc` to only encrypt modified temporary files
+* improve the file structure to only use one subkey nonce
+* update `ENCRYPTION.md` to reflect the updated file structure
+* improve `vim02enc` to only encrypt modified temporary files
 
 # 0.1a0 (2024-08-24)
 

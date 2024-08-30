@@ -134,11 +134,11 @@ v02enc --decrypt --key ~/.v02enc --input ./example.txt.v02enc --output -
 ### Update a file
 
 ```
-# in-place update using STDIN
-echo -n "new text" | v02enc --update - --key ~/.v02enc --input ./example.txt.v02enc --output ./example.txt.v02enc
+# update using STDIN
+echo -n "new text" | v02enc --update - --key ~/.v02enc --input ./example.txt.v02enc --output ./example.txt.v02enc.tmp && mv ./example.txt.v02enc.tmp ./example.txt.v02enc
 
-# in-place update using a file
-v02enc --update ./new-text.txt --key ~/.v02enc --input ./example.txt.v02enc --output ./example.txt.v02enc
+# update using a file
+v02enc --update ./new-text.txt --key ~/.v02enc --input ./example.txt.v02enc --output ./example.txt.v02enc.tmp && mv ./example.txt.v02enc.tmp ./example.txt.v02enc
 ```
 
 ### Use vim to update a file
@@ -153,10 +153,6 @@ vim02enc ./example.txt.v02enc
 # using explicit passphrase file path
 V02ENC_KEY=~/.v02enc ./example.txt.v02enc
 ```
-
-## Limitations
-
-`v02enc` does not implement streaming encryption and therefore does not support large files.
 
 ## Origin
 
