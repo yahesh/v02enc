@@ -57,7 +57,7 @@ define("MESSAGEMACKEY", "messagemackey");
 define("MESSAGENONCE",  "messagenonce");
 define("SUBKEY",        "subkey");
 define("SUBKEYCOUNT",   "subkeycount");
-define("SUBKEYHEADER",  "subkeykeyheader");
+define("SUBKEYHEADER",  "subkeyheader");
 define("SUBKEYLIST",    "subkeylist");
 define("VERSION",       "version");
 
