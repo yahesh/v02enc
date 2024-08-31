@@ -40,7 +40,7 @@ define("AES256_BLOCK_SIZE",  16);
 define("AES256_KEY_SIZE",    32);
 define("ARMOR_RAW_LENGTH",   48);
 define("SHA256_OUTPUT_SIZE", 32);
-define("STREAM_RAW_LENGTH",  ARMOR_RAW_LENGTH*22); // = ~1k blocks
+define("STREAM_RAW_LENGTH",  ARMOR_RAW_LENGTH*200); // = ~8k blocks
 
 # define encryption fields
 define("CHECKMAC",      "checkmac");
@@ -384,12 +384,10 @@ function dearmor($message) {
 function increment($counter, $increment = 0x01) {
   $result = $counter;
 
-  if (is_string($result)   &&
-      (0x00 <= $increment) &&
-      (0xFF >= $increment)) {
+  if (is_string($result) && is_int($increment) && (0x00 <= $increment)) {
     # add increment to the result
     for ($index = strlen($result)-0x01; $index >= 0x00; $index--) {
-      $tmp            = (((ord($result[$index]) + $increment) >> 0x08) & 0xFF);
+      $tmp            = ((ord($result[$index]) + $increment) >> 0x08);
       $result[$index] = chr((ord($result[$index]) + $increment) & 0xFF);
       $increment      = $tmp;
     }
@@ -507,9 +505,10 @@ function decrypt_message($input, $output, &$data, &$error) {
       $buffer  = "";
       $counter = $data[MESSAGENONCE];
       while (!input_eof($input) && (false === $error)) {
-        # we read a straight number of ARMOR_RAW_LENGTH blocks to
-        # optimize the output buffering behaviour while making sure
-        # that the buffer length aligns with the AES block size
+        # we read a specific number of ARMOR_RAW_LENGTH blocks to
+        # optimize the input and output buffering behaviour by
+        # ensuring that the block size aligns with the AES block
+        # size, armor raw length and armor Base64 length
         $tmp = input_read($input, STREAM_RAW_LENGTH);
         if (false !== $tmp) {
           # add read string to buffer
@@ -620,9 +619,10 @@ function encrypt_message($input, $output, &$data, &$error) {
           $buffer  = "";
           $counter = $data[MESSAGENONCE];
           while (!input_eof($input) && (false === $error)) {
-            # we read a straight number of ARMOR_RAW_LENGTH blocks to
-            # optimize the output buffering behaviour while making sure
-            # that the buffer length aligns with the AES block size
+            # we read a specific number of ARMOR_RAW_LENGTH blocks to
+            # optimize the input and output buffering behaviour by
+            # ensuring that the block size aligns with the AES block
+            # size, armor raw length and armor Base64 length
             $tmp = input_read($input, STREAM_RAW_LENGTH);
             if (false !== $tmp) {
               # add read string to buffer
@@ -1089,7 +1089,7 @@ function print_error($string) {
 }
 
 function print_help() {
-  print("v02enc v0.2b0\n");
+  print("v02enc v0.2b1\n");
   print("\n");
   print("Usage:\n");
   print("\n");

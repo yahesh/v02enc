@@ -1,3 +1,7 @@
+# 0.2b1 (2024-08-31)
+
+* increase block length to speed up encryption and decryption
+
 # 0.2b0 (2024-08-31)
 
 * improve the file structure to support streamed encryption
