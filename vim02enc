@@ -62,13 +62,25 @@ then
           # we update the file
           if [[ "${UPDATE}" -eq "1" ]]
           then
+            # generate the temporary output file name
+            OUTPUTFILE=$(/usr/bin/env mktemp)
+
             # use armored output
             if [[ "${V02ENC_ARMOR}" -eq "1" ]]
             then
-              "${SCRIPT_DIR}/v02enc" --armor --input "${1}" --key "${V02ENC_KEY}" --output "${1}" --update "${TEMPFILE}"
+              "${SCRIPT_DIR}/v02enc" --armor --input "${1}" --key "${V02ENC_KEY}" --output "${OUTPUTFILE}" --update "${TEMPFILE}"
             else
-              "${SCRIPT_DIR}/v02enc" --input "${1}" --key "${V02ENC_KEY}" --output "${1}" --update "${TEMPFILE}"
+              "${SCRIPT_DIR}/v02enc" --input "${1}" --key "${V02ENC_KEY}" --output "${OUTPUTFILE}" --update "${TEMPFILE}"
             fi
+
+            # only replace the previous file if encryption succeeded
+            if [[ "$?" -eq "0" ]]
+            then
+              cat "${OUTPUTFILE}" >"${1}"
+            fi
+
+            # try to delete the temporary file either way
+            rm -f "${OUTPUTFILE}"
           else
             # use armored output
             if [[ "${V02ENC_ARMOR}" -eq "1" ]]
