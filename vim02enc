@@ -53,6 +53,9 @@ then
       # only proceed if we closed vim properly
       if [[ "$?" -eq "0" ]]
       then
+        # prepare encryption result
+        SUCCESS="0"
+
         # get the new last-modified date of the temporary file
         NEWMODIFIED=$(date -r "${TEMPFILE}" "+%s")
 
@@ -73,14 +76,30 @@ then
               "${SCRIPT_DIR}/v02enc" --input "${1}" --key "${V02ENC_KEY}" --output "${OUTPUTFILE}" --update "${TEMPFILE}"
             fi
 
-            # only replace the previous file if encryption succeeded
-            if [[ "$?" -eq "0" ]]
-            then
-              cat "${OUTPUTFILE}" >"${1}"
-            fi
+            # keep exit code
+            SUCCESS="$?"
 
-            # try to delete the temporary file either way
-            rm -f "${OUTPUTFILE}"
+            # only replace the previous file if encryption succeeded
+            if [[ "${SUCCESS}" -eq "0" ]]
+            then
+              # use cat to keep file owner and file mode
+              cat "${OUTPUTFILE}" >"${1}"
+
+              # clean up the temporary output file
+              if [[ "$?" -eq "0" ]]
+              then
+                # try to delete the temporary output file
+                rm -f "${OUTPUTFILE}"
+              else
+                # throw a tantrum if cat failed, we are about to lose the original file!
+                echo "ERROR: Writing the encrypted data back to the original file failed!" >&2
+                echo "ERROR: You are about to lose the content of the original file!" >&2
+                echo "ERROR: Please move the encrypted data to the original file yourself!" >&2
+                echo "ERROR: The encrypted data are located here:" >&2
+                echo "ERROR: ${OUTPUTFILE}"
+                EXITCODE="6"
+              fi
+            fi
           else
             # use armored output
             if [[ "${V02ENC_ARMOR}" -eq "1" ]]
@@ -89,35 +108,38 @@ then
             else
               "${SCRIPT_DIR}/v02enc" --encrypt --input "${TEMPFILE}" --key "${V02ENC_KEY}" --output "${1}"
             fi
+
+            # keep exit code
+            SUCCESS="$?"
           fi
         else
           echo "INFO: Skipping unmodified file." >&2
         fi
 
         # print a message if an error occured
-        if [[ "$?" -ne "0" ]]
+        if [[ "${SUCCESS}" -ne "0" ]]
         then
           echo "ERROR: File could not be encrypted." >&2
-          EXITCODE="5";
+          EXITCODE="5"
         fi
       else
         echo "ERROR: Vim closed unexpectedly." >&2
-        EXITCODE="4";
+        EXITCODE="4"
       fi
     else
       echo "ERROR: Temporary file access could not be restricted." >&2
-      EXITCODE="3";
+      EXITCODE="3"
     fi
   else
     echo "ERROR: Temporary file could not be prepared." >&2
-    EXITCODE="2";
+    EXITCODE="2"
   fi
 
   # try to delete the temporary file either way
   rm -f "${TEMPFILE}"
 else
   echo "ERROR: v02enc key file does not exit: ${V02ENC_KEY}" >&2
-  EXITCODE="1";
+  EXITCODE="1"
 fi
 
 # set the exit code

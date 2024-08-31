@@ -71,7 +71,7 @@ then
   fi
 else
   echo "ERROR: v02enc key file does not exit: ${V02ENC_KEY}" >&2
-  EXITCODE="1";
+  EXITCODE="1"
 fi
 
 # only handle output if there was no error
