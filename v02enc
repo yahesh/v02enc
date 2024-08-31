@@ -363,21 +363,6 @@ function output_write($name, $data) {
   return $result;
 }
 
-function dearmor($message) {
-  $result = false;
-
-  if (false !== preg_match_all(ARMOR_REGEX, $message, $matches)) {
-    if (array_key_exists(ARMOR_MESSAGE, $matches)) {
-      # make sure that the block only contains one armored message
-      if (1 === count($matches[ARMOR_MESSAGE])) {
-        $result = base64_decode($matches[ARMOR_MESSAGE][0], true);
-      }
-    }
-  }
-
-  return $result;
-}
-
 ##### CRYPTOGRAPHIC FUNCTIONS #####
 
 # TODO: chr() and ord() are not time-constant
