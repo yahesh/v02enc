@@ -88,7 +88,7 @@ function input_dearmor($name) {
       # read the first byte to check if it contains the version byte
       $byte = fread($__INPUTS[$name][STREAM], strlen(VERSION_BYTE));
       if (false !== $byte) {
-        # is the read value the version byte 
+        # is the read value the version byte
         if (VERSION_BYTE === $byte) {
           # put the read byte in the input buffer
           $__INPUTS[$name][BUFFER] = $byte;
@@ -101,6 +101,12 @@ function input_dearmor($name) {
           # consume empty lines
           while (!input_eof($name) && (false !== $line) && (0 === strlen($line))) {
             $line = input_readln($name);
+
+            # handle the byte that was initially read
+            if (false !== $line) {
+              $line = trim($byte.$line, "\n\r");
+              $byte = "";
+            }
           }
 
           # check if we found the armor header
