@@ -1,3 +1,7 @@
+# 0.2b3 (2024-09-01)
+
+* handle leading and trailing line breaks of armored input more properly
+
 # 0.2b2 (2024-09-01)
 
 * add info if handling ends before input eof

@@ -68,6 +68,9 @@ define("EOF",    "eof");
 define("NAME",   "name");
 define("STREAM", "stream");
 
+# define version number
+define("VERSION_BYTE", "\x02");
+
 ##### GLOBAL VARIABLES #####
 
 $__INPUTS  = [];
@@ -82,17 +85,33 @@ function input_dearmor($name) {
 
   if (is_string($name)) {
     if (array_key_exists($name, $__INPUTS)) {
-      # read the first bytes to check if the input is armored
-      $tmp = fread($__INPUTS[$name][STREAM], strlen(ARMOR_HEADER));
-      if (false !== $tmp) {
-        $__INPUTS[$name][ARMOR] = (0 === strcmp($tmp, ARMOR_HEADER));
-        if (!$__INPUTS[$name][ARMOR]) {
-          # put the read bytes in the input buffer
-          $__INPUTS[$name][BUFFER] = $tmp;
+      # read the first byte to check if it contains the version byte
+      $byte = fread($__INPUTS[$name][STREAM], strlen(VERSION_BYTE));
+      if (false !== $byte) {
+        # is the read value the version byte 
+        if (VERSION_BYTE === $byte) {
+          # put the read byte in the input buffer
+          $__INPUTS[$name][BUFFER] = $byte;
+
+          # this was successful
+          $result = true;
+        } else {
+          $line = "";
+
+          # consume empty lines
+          while (!input_eof($name) && (false !== $line) && (0 === strlen($line))) {
+            $line = input_readln($name);
+          }
+
+          # check if we found the armor header
+          if (ARMOR_HEADER === $line) {
+            $__INPUTS[$name][ARMOR] = true;
+
+            # this was successful
+            $result = true;
+          }
         }
       }
-
-      $result = true;
     }
   }
 
@@ -157,6 +176,20 @@ function input_init($name, $stream) {
   return $result;
 }
 
+function input_isarmor($name) {
+  global $__INPUTS;
+
+  $result = false;
+
+  if (is_string($name)) {
+    if (array_key_exists($name, $__INPUTS)) {
+      $result = $__INPUTS[$name][ARMOR];
+    }
+  }
+
+  return $result;
+}
+
 function input_read($name, $length) {
   global $__INPUTS;
 
@@ -178,13 +211,10 @@ function input_read($name, $length) {
         $tmp = false;
 
         while (!input_eof($name) && (strlen($result) < $length) && (false !== $result)) {
-          if ($__INPUTS[$name][ARMOR]) {
+          if (input_isarmor($name)) {
             # read next line
-            $tmp = fgets($__INPUTS[$name][STREAM]);
+            $tmp = input_readln($name);
             if (false !== $tmp) {
-              # remove line breaks from the end of the line
-              $tmp = rtrim($tmp, "\n\r");
-
               # ignore empty line
               if (0 < strlen($tmp)) {
                 # check if we found the armor footer
@@ -237,12 +267,58 @@ function input_read($name, $length) {
   return $result;
 }
 
+function input_readln($name) {
+  global $__INPUTS;
+
+  $result = false;
+
+  if (is_string($name)) {
+    if (array_key_exists($name, $__INPUTS)) {
+      $result = fgets($__INPUTS[$name][STREAM]);
+      if (false !== $result) {
+        # remove line breaks from the end of the line
+        $result = trim($result, "\n\r");
+      }
+    }
+  }
+
+  return $result;
+}
+
 function input_read_collect($name, $length, &$collection) {
   $result = input_read($name, $length);
 
   # if we have returned data, append to $collection
   if (is_string($result)) {
     $collection .= $result;
+  }
+
+  return $result;
+}
+
+function input_trailing($name) {
+  global $__INPUTS;
+
+  $result = false;
+
+  if (is_string($name)) {
+    if (array_key_exists($name, $__INPUTS)) {
+      # check if we reached eof
+      $result = !feof($__INPUTS[$name][STREAM]);
+
+      # only continue if we have an armored file
+      if ($result && input_isarmor($name)) {
+        $line = "";
+
+        # consume empty lines
+        while (!feof($__INPUTS[$name][STREAM]) && (false !== $line) && (0 === strlen($line))) {
+          $line = input_readln($name);
+        }
+
+        # check if we reached eof or encountered additional content
+        $result = (!feof($__INPUTS[$name][STREAM]) || (0 < strlen($line)));
+      }
+    }
   }
 
   return $result;
@@ -413,7 +489,7 @@ function decrypt_header($input, $recipients, &$data, &$error) {
       # do not add the header mac to the overall header
       $data[HEADERMAC] = input_read($input, SHA256_OUTPUT_SIZE);
 
-      if ("\x02" === $data[VERSION]) {
+      if (VERSION_BYTE === $data[VERSION]) {
         # prevent excessive key search if we reached eof,
         # this is definitely a malformed input
         if (!input_eof($input)) {
@@ -1084,7 +1160,7 @@ function print_info($string) {
 }
 
 function print_help() {
-  print("v02enc v0.2b2\n");
+  print("v02enc v0.2b3\n");
   print("\n");
   print("Usage:\n");
   print("\n");
@@ -1280,7 +1356,7 @@ function main($arguments) {
                               # warn user if file handling ended before eof, this can happen
                               # with armored files that have additional content after the
                               # armor footer, this is not an error but expected behaviour
-                              if (!feof($inputstream)) {
+                              if (input_trailing("input")) {
                                 print_info("The input contains unprocessed trailing content.");
                               }
                             } else {
