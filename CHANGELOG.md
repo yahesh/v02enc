@@ -1,3 +1,8 @@
+# 0.2b2 (2024-09-01)
+
+* add info if handling ends before input eof
+* add eof check before excessive key expansions are executed
+
 # 0.2b1 (2024-08-31)
 
 * increase block length to speed up encryption and decryption

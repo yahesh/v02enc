@@ -177,57 +177,57 @@ function input_read($name, $length) {
       if (strlen($result) < $length) {
         $tmp = false;
 
-        if ($__INPUTS[$name][ARMOR]) {
-          while (!feof($__INPUTS[$name][STREAM]) && (strlen($result) < $length) && (false !== $result)) {
+        while (!input_eof($name) && (strlen($result) < $length) && (false !== $result)) {
+          if ($__INPUTS[$name][ARMOR]) {
             # read next line
             $tmp = fgets($__INPUTS[$name][STREAM]);
             if (false !== $tmp) {
               # remove line breaks from the end of the line
               $tmp = rtrim($tmp, "\n\r");
 
-              # check if we found the armor footer
-              if (0 === strcmp($tmp, ARMOR_FOOTER)) {
-                # set the input to end-of-file
-                $__INPUTS[$name][EOF] = true;
-
-                # break the loop
-                break;
-              } else {
-                # decode the line
-                $tmp = base64_decode($tmp, true);
-                if (false !== $tmp) {
-                  # the new block is enough to reach the $length
-                  if (strlen($result)+strlen($tmp) >= $length) {
-                    # how many bytes to take from the new block
-                    $count = $length-strlen($result);
-
-                    # write bytes to result
-                    $result .= substr($tmp, 0, $count);
-
-                    # update the input buffer
-                    $__INPUTS[$name][BUFFER] = substr($tmp, $count);
-                  } else {
-                    $result .= $tmp;
-                  }
+              # ignore empty line
+              if (0 < strlen($tmp)) {
+                # check if we found the armor footer
+                if (0 === strcmp($tmp, ARMOR_FOOTER)) {
+                  # set the input to end-of-file
+                  $__INPUTS[$name][EOF] = true;
                 } else {
-                  # decode errors have priority
-                  $result = false;
+                  # decode the line
+                  $tmp = base64_decode($tmp, true);
+                  if (false !== $tmp) {
+                    # the new block is enough to reach the $length
+                    if (strlen($result)+strlen($tmp) >= $length) {
+                      # how many bytes to take from the new block
+                      $count = $length-strlen($result);
+
+                      # write bytes to result
+                      $result .= substr($tmp, 0, $count);
+
+                      # update the input buffer
+                      $__INPUTS[$name][BUFFER] = substr($tmp, $count);
+                    } else {
+                      $result .= $tmp;
+                    }
+                  } else {
+                    # decode errors have priority
+                    $result = false;
+                  }
                 }
               }
             } else {
               # read errors have priority
               $result = false;
             }
-          }
-        } else {
-          # just read the data
-          $tmp = fread($__INPUTS[$name][STREAM], $length-strlen($result));
-
-          if (false !== $tmp) {
-            $result .= $tmp;
           } else {
-            # read errors have priority
-            $result = false;
+            # just read the data
+            $tmp = fread($__INPUTS[$name][STREAM], $length-strlen($result));
+
+            if (false !== $tmp) {
+              $result .= $tmp;
+            } else {
+              # read errors have priority
+              $result = false;
+            }
           }
         }
       }
@@ -414,53 +414,59 @@ function decrypt_header($input, $recipients, &$data, &$error) {
       $data[HEADERMAC] = input_read($input, SHA256_OUTPUT_SIZE);
 
       if ("\x02" === $data[VERSION]) {
-        # set default key value
-        $data[KEY] = false;
+        # prevent excessive key search if we reached eof,
+        # this is definitely a malformed input
+        if (!input_eof($input)) {
+          # set default key value
+          $data[KEY] = false;
 
-        # iterate through the recipients and see whether we find a fitting key
-        $keys    = array_keys($recipients);
-        $subkeys = array_keys($data[SUBKEYLIST]);
-        foreach ($subkeys as $subkey) {
-          foreach ($keys as $key) {
-            # derive secure key from recipient key and salt
-            $data[SUBKEYLIST][$subkey][SUBKEY][$key] = hash_pbkdf2("sha256", $recipients[$key], $data[HEADERSALT], 512000, 0, true);
+          # iterate through the recipients and see whether we find a fitting key
+          $keys    = array_keys($recipients);
+          $subkeys = array_keys($data[SUBKEYLIST]);
+          foreach ($subkeys as $subkey) {
+            foreach ($keys as $key) {
+              # derive secure key from recipient key and salt
+              $data[SUBKEYLIST][$subkey][SUBKEY][$key] = hash_pbkdf2("sha256", $recipients[$key], $data[HEADERSALT], 512000, 0, true);
 
-            if (false !== $data[SUBKEYLIST][$subkey][SUBKEY][$key]) {
-              # decrypt subkey with derived secure key
-              $data[SUBKEYLIST][$subkey][KEY][$key] = openssl_decrypt($data[SUBKEYLIST][$subkey][SUBKEYHEADER], "aes-256-ctr", $data[SUBKEYLIST][$subkey][SUBKEY][$key], OPENSSL_RAW_DATA | OPENSSL_ZERO_PADDING, $data[HEADERNONCE]);
+              if (false !== $data[SUBKEYLIST][$subkey][SUBKEY][$key]) {
+                # decrypt subkey with derived secure key
+                $data[SUBKEYLIST][$subkey][KEY][$key] = openssl_decrypt($data[SUBKEYLIST][$subkey][SUBKEYHEADER], "aes-256-ctr", $data[SUBKEYLIST][$subkey][SUBKEY][$key], OPENSSL_RAW_DATA | OPENSSL_ZERO_PADDING, $data[HEADERNONCE]);
 
-              if (false !== $data[SUBKEYLIST][$subkey][KEY][$key]) {
-                # generate mac keys
-                $data[SUBKEYLIST][$subkey][HEADERMACKEY][$key] = hash_hmac("sha256", "mac-header", $data[SUBKEYLIST][$subkey][KEY][$key], true);
+                if (false !== $data[SUBKEYLIST][$subkey][KEY][$key]) {
+                  # generate mac keys
+                  $data[SUBKEYLIST][$subkey][HEADERMACKEY][$key] = hash_hmac("sha256", "mac-header", $data[SUBKEYLIST][$subkey][KEY][$key], true);
 
-                if (false !== $data[SUBKEYLIST][$subkey][HEADERMACKEY][$key]) {
-                  # calculate header mac with header mac key
-                  $data[SUBKEYLIST][$subkey][CHECKMAC][$key] = hash_hmac("sha256", $data[HEADER], $data[SUBKEYLIST][$subkey][HEADERMACKEY][$key], true);
+                  if (false !== $data[SUBKEYLIST][$subkey][HEADERMACKEY][$key]) {
+                    # calculate header mac with header mac key
+                    $data[SUBKEYLIST][$subkey][CHECKMAC][$key] = hash_hmac("sha256", $data[HEADER], $data[SUBKEYLIST][$subkey][HEADERMACKEY][$key], true);
 
-                  if (false !== $data[SUBKEYLIST][$subkey][CHECKMAC][$key]) {
-                    if (hash_equals($data[SUBKEYLIST][$subkey][CHECKMAC][$key], $data[HEADERMAC])) {
-                      # generate encryption key
-                      $data[KEY] = $data[SUBKEYLIST][$subkey][KEY][$key];
+                    if (false !== $data[SUBKEYLIST][$subkey][CHECKMAC][$key]) {
+                      if (hash_equals($data[SUBKEYLIST][$subkey][CHECKMAC][$key], $data[HEADERMAC])) {
+                        # generate encryption key
+                        $data[KEY] = $data[SUBKEYLIST][$subkey][KEY][$key];
+                      }
                     }
                   }
                 }
               }
             }
           }
-        }
 
-        if (false !== $data[KEY]) {
-          $data[ENCKEY]        = hash_hmac("sha256", "enc",         $data[KEY], true); // generate enc key
-          $data[HEADERMACKEY]  = hash_hmac("sha256", "mac-header" , $data[KEY], true); // generate mac key
-          $data[MESSAGEMACKEY] = hash_hmac("sha256", "mac-message", $data[KEY], true); // generate mac key
+          if (false !== $data[KEY]) {
+            $data[ENCKEY]        = hash_hmac("sha256", "enc",         $data[KEY], true); // generate enc key
+            $data[HEADERMACKEY]  = hash_hmac("sha256", "mac-header" , $data[KEY], true); // generate mac key
+            $data[MESSAGEMACKEY] = hash_hmac("sha256", "mac-message", $data[KEY], true); // generate mac key
 
-          if ((false !== $data[ENCKEY]) && (false !== $data[MESSAGEMACKEY]) && (false !== $data[MESSAGEMACKEY])) {
-            $result = true;
+            if ((false !== $data[ENCKEY]) && (false !== $data[MESSAGEMACKEY]) && (false !== $data[MESSAGEMACKEY])) {
+              $result = true;
+            } else {
+              $error = "Key expansion failed.";
+            }
           } else {
-            $error = "Key expansion failed.";
+            $error = "No matching recipient provided.";
           }
         } else {
-          $error = "No matching recipient provided.";
+          $error = "Message has malformed header.";
         }
       } else  {
         $error = "Message has wrong version.";
@@ -1070,11 +1076,15 @@ function get_short_opts() {
 }
 
 function print_error($string) {
-  fwrite(STDERR, "ERROR: {$string}\n");
+  fwrite(STDERR, "\nERROR: {$string}\n");
+}
+
+function print_info($string) {
+  fwrite(STDERR, "\nINFO: {$string}\n");
 }
 
 function print_help() {
-  print("v02enc v0.2b1\n");
+  print("v02enc v0.2b2\n");
   print("\n");
   print("Usage:\n");
   print("\n");
@@ -1266,7 +1276,14 @@ function main($arguments) {
                             }
 
                             # ensure that the execution succeeded
-                            if (!$success) {
+                            if ($success) {
+                              # warn user if file handling ended before eof, this can happen
+                              # with armored files that have additional content after the
+                              # armor footer, this is not an error but expected behaviour
+                              if (!feof($inputstream)) {
+                                print_info("The input contains unprocessed trailing content.");
+                              }
+                            } else {
                               # print method errors
                               print_error($error);
                               $result = 13;
