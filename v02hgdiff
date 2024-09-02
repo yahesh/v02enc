@@ -13,10 +13,9 @@ HG_ROOT="${1}"
 FILE1="${2}"
 FILE2="${3}"
 
-# prepare the exit code
-EXITCODE="0"
-
 # prepare the output
+COMPARED="0"
+EXITCODE="0"
 OUTPUT=()
 TEMPFILE1="${FILE1}"
 TEMPFILE2="${FILE2}"
@@ -32,75 +31,139 @@ then
       TEMPFILE1=$(/usr/bin/env mktemp)
       TEMPFILE2=$(/usr/bin/env mktemp)
 
-      # decrypt the first file
-      "${SCRIPT_DIR}/v02enc" --decrypt --key "${V02ENC_KEY}" --input "${FILE1}" --output "${TEMPFILE1}" 2>/dev/null
+      # prepare exit codes
+      EXITCODE1="0"
+      EXITCODE2="0"
 
-      if [[ "$?" -eq "0" ]]
+      if [[ -f "${FILE1}" ]]
       then
-        # set restrictive temporary file access
-        chmod 600 "${TEMPFILE1}"
+        # decrypt the first file
+        "${SCRIPT_DIR}/v02enc" --decrypt --key "${V02ENC_KEY}" --input "${FILE1}" --output "${TEMPFILE1}" 2>/dev/null
+
+        # store exit code
+        EXITCODE1="$?"
+
+        if [[ "${EXITCODE1}" -eq "0" ]]
+        then
+          # set restrictive temporary file access
+          chmod 600 "${TEMPFILE1}"
+        fi
       fi
 
-      # decrypt the second file
-      "${SCRIPT_DIR}/v02enc" --decrypt --key "${V02ENC_KEY}" --input "${FILE2}" --output "${TEMPFILE2}" 2>/dev/null
-
-      if [[ "$?" -eq "0" ]]
+      if [[ -f "${FILE2}" ]]
       then
-        # set restrictive temporary file access
-        chmod 600 "${TEMPFILE2}"
+        # decrypt the second file
+        "${SCRIPT_DIR}/v02enc" --decrypt --key "${V02ENC_KEY}" --input "${FILE2}" --output "${TEMPFILE2}" 2>/dev/null
+
+        # store exit code
+        EXITCODE2="$?"
+
+        if [[ "${EXITCODE2}" -eq "0" ]]
+        then
+          # set restrictive temporary file access
+          chmod 600 "${TEMPFILE2}"
+        fi
       fi
 
-      # compare decrypted files
-      IFS=$'\n' OUTPUT=($(/usr/bin/env diff --color=always -Npu "${TEMPFILE1}" "${TEMPFILE2}" | /usr/bin/env colordiff))
+      # check that both files could be decrypted
+      if [[ "${EXITCODE1}" -eq "0" && "${EXITCODE2}" -eq "0" ]]
+      then
+        # prevent normal file diff
+        COMPARED="1"
 
-      # try to delete the temporary file either way
-      rm -f "${TEMPFILE1}"
+        # compare decrypted files
+        IFS=$'\n' OUTPUT=($(/usr/bin/env diff --color=never -Npu "${TEMPFILE1}" "${TEMPFILE2}"))
 
-      # try to delete the temporary file either way
-      rm -f "${TEMPFILE1}"
-    else
-      # handle as normal files
-      IFS=$'\n' OUTPUT=($(/usr/bin/env diff --color=always -Npu "${FILE1}" "${FILE2}" | /usr/bin/env colordiff))
+        # store exit code
+        EXITCODE="$?"
+      fi
+
+      if [[ -f "${FILE1}" ]]
+      then
+        # try to delete the temporary file either way
+        rm -f "${TEMPFILE1}"
+      fi
+
+      if [[ -f "${FILE2}" ]]
+      then
+        # try to delete the temporary file either way
+        rm -f "${TEMPFILE2}"
+      fi
     fi
-  else
-    # handle as normal files
-    IFS=$'\n' OUTPUT=($(/usr/bin/env diff --color=always -Npu "${FILE1}" "${FILE2}" | /usr/bin/env colordiff))
   fi
-else
-  echo "ERROR: v02enc key file does not exit: ${V02ENC_KEY}" >&2
-  EXITCODE="1"
+fi
+
+# handle as normal files
+if [[ "${COMPARED}" -eq "0" ]]
+then
+  # reset temporary file names
+  TEMPFILE1="${FILE1}"
+  TEMPFILE2="${FILE2}"
+
+  # just to be sure
+  COMPARED="1"
+
+  # compare decrypted files
+  IFS=$'\n' OUTPUT=($(/usr/bin/env diff --color=never -Npu "${TEMPFILE1}" "${TEMPFILE2}"))
+
+  # store exit code
+  EXITCODE="$?"
 fi
 
 # only handle output if there was no error
-if [[ "${EXITCODE}" -eq "0" && "${#OUTPUT[@]}" -gt "0" ]]
+if [[ "${#OUTPUT[@]}" -gt "0" ]]
 then
   # prepare clean filename
   FILENAME="${FILE2}"
   FILENAME="${FILENAME#"$HG_ROOT"}"
   FILENAME="${FILENAME#"/"}"
 
-  # prepare first output line
-  LINE="${OUTPUT[0]}"
-  LINE="${LINE#"--- ${TEMPFILE1}"}"
-  if [[ "${FILE1}" == "/dev/null" ]]
+  # check for the known exit code
+  if [[ "${EXITCODE}" -eq "1" ]]
   then
-    OUTPUT[0]="--- /dev/null"
-  else
-    OUTPUT[0]="--- a/${FILENAME}"
-  fi
+    # check if the output is a diff
+    if [[ "${OUTPUT[0]:0:3}" == "---" ]]
+    then
+      # prepare first output line
+      if [[ "${FILE1}" == "/dev/null" ]]
+      then
+        OUTPUT[0]="--- /dev/null"
+      else
+        OUTPUT[0]="--- a/${FILENAME}"
+      fi
 
-  # prepare second output line
-  LINE="${OUTPUT[1]}"
-  LINE="${LINE#"+++ ${TEMPFILE2}"}"
-  if [[ "${FILE2}" == "/dev/null" || ! -f "${FILE2}" ]]
-  then
-    OUTPUT[1]="+++ /dev/null"
-  else
-    OUTPUT[1]="+++ b/${FILENAME}"
-  fi
+      # prepare second output line
+      if [[ "${FILE2}" == "/dev/null" || ! -f "${FILE2}" ]]
+      then
+        OUTPUT[1]="+++ /dev/null"
+      else
+        OUTPUT[1]="+++ b/${FILENAME}"
+      fi
 
-  printf '%s\n' "${OUTPUT[@]}"
+      printf '%s\n' "${OUTPUT[@]}" | colordiff
+    else
+      # prepare placeholders
+      PLACEHOLDER1=""
+      PLACEHOLDER2=""
+
+      if [[ "${FILE1}" == "/dev/null" ]]
+      then
+        PLACEHOLDER1="/dev/null"
+      else
+        PLACEHOLDER1="a/${FILENAME}"
+      fi 
+
+      if [[ "${FILE2}" == "/dev/null" || ! -f "${FILE2}" ]]
+      then
+        PLACEHOLDER2="/dev/null"
+      else
+        PLACEHOLDER2="b/${FILENAME}"
+      fi
+
+      echo -e "Binary files ${PLACEHOLDER1} and ${PLACEHOLDER2} differ\n" | colordiff
+    fi
+  else
+    # just output the text
+    printf '%s\n' "${OUTPUT[@]}"
+  fi
 fi
-
-# set the exit code
-exit "${EXITCODE}"

@@ -1,3 +1,7 @@
+# 0.2b4 (2024-09-02)
+
+* do not check trailing content on update
+
 # 0.2b3 (2024-09-01)
 
 * handle leading and trailing line breaks of armored input more properly

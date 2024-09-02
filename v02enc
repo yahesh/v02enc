@@ -1166,7 +1166,7 @@ function print_info($string) {
 }
 
 function print_help() {
-  print("v02enc v0.2b3\n");
+  print("v02enc v0.2b4\n");
   print("\n");
   print("Usage:\n");
   print("\n");
@@ -1361,14 +1361,18 @@ function main($arguments) {
                             if ($success) {
                               # warn user if file handling ended before eof, this can happen
                               # with armored files that have additional content after the
-                              # armor footer, this is not an error but expected behaviour
-                              if (input_trailing("input")) {
-                                print_info("The input contains unprocessed trailing content.");
+                              # armor footer, this is not an error but expected behaviour,
+                              # skip this test on update as we will only read the header
+                              # when updating an existing file
+                              if ($decrypt || $encrypt) {
+                                if (input_trailing("input")) {
+                                  print_info("The input contains unprocessed trailing content.");
+                                }
                               }
                             } else {
                               # print method errors
                               print_error($error);
-                              $result = 13;
+                            $result = 13;
                             }
                           } finally {
                             if (!output_finit("output")) {
