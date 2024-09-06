@@ -3,10 +3,41 @@
 # set a default for the key file if none is given
 if [[ -z "${V02ENC_KEY}" ]]
 then
-  V02ENC_KEY=~/.v02enc
+  V02ENC_KEY="-"
 fi
 
-SCRIPT_DIR=$(dirname $(realpath "$0"))
+# set a de fault for the passphrase if non is given
+if [[ -z "${V02ENC_PASSPHRASE}" ]]
+then
+  # set to empty string by default
+  V02ENC_PASSPHRASE=""
+
+  if [[ "${V02ENC_KEY}" == "-" ]]
+  then
+    # check if there is a key file
+    if [[ -f ~/.v02enc ]]
+    then
+      # read the key file
+      V02ENC_PASSPHRASE="$(/usr/bin/env cat ~/.v02enc | /usr/bin/env xxd -p | /usr/bin/env tr -d "\n")"
+    else
+      # check if we are running macOS
+      OS="$(/usr/bin/env uname -s | /usr/bin/env tr "[:upper:]" "[:lower:]")"
+
+      if [[ "$OS" == "darwin" ]]
+      then
+        # try to read the default keychain value
+        TMP="$(/usr/bin/env security find-generic-password -a "$(/usr/bin/env whoami)" -s "v02enc" -w 2>/dev/null)"
+
+        if [[ "$?" -eq "0" ]]
+        then
+          V02ENC_PASSPHRASE="${TMP}"
+        fi
+      fi
+    fi
+  fi
+fi
+
+SCRIPT_DIR="$(/usr/bin/env dirname "$(/usr/bin/env realpath "$0")")"
 
 # handle parameters
 GIT_ROOT="${PWD}"
@@ -23,7 +54,7 @@ OUTPUT=()
 TEMPFILE1="${FILE1}"
 TEMPFILE2="${FILE2}"
 
-if [[ -f "${V02ENC_KEY}" ]]
+if [[ ${V02ENC_KEY} == "-" || -f "${V02ENC_KEY}" ]]
 then
   if [[ -f "${FILE1}" || -f "${FILE2}" ]]
   then
@@ -31,8 +62,8 @@ then
     if [[ "${FILE1: -7}" == ".v02enc" || "${FILE2: -7}" == ".v02enc" ]]
     then
       # generate the temporary file names
-      TEMPFILE1=$(/usr/bin/env mktemp)
-      TEMPFILE2=$(/usr/bin/env mktemp)
+      TEMPFILE1="$(/usr/bin/env mktemp)"
+      TEMPFILE2="$(/usr/bin/env mktemp)"
 
       # prepare exit codes
       EXITCODE1="0"
@@ -41,7 +72,7 @@ then
       if [[ -f "${FILE1}" ]]
       then
         # decrypt the first file
-        "${SCRIPT_DIR}/v02enc" --decrypt --key "${V02ENC_KEY}" --input "${FILE1}" --output "${TEMPFILE1}" 2>/dev/null
+        echo -n "${V02ENC_PASSPHRASE}" | /usr/bin/env xxd -p -r | "${SCRIPT_DIR}/v02enc" --decrypt --key "${V02ENC_KEY}" --input "${FILE1}" --output "${TEMPFILE1}" 2>/dev/null
 
         # store exit code
         EXITCODE1="$?"
@@ -49,14 +80,14 @@ then
         if [[ "${EXITCODE1}" -eq "0" ]]
         then
           # set restrictive temporary file access
-          chmod 600 "${TEMPFILE1}"
+          /usr/bin/env chmod 600 "${TEMPFILE1}"
         fi
       fi
 
       if [[ -f "${FILE2}" ]]
       then
         # decrypt the second file
-        "${SCRIPT_DIR}/v02enc" --decrypt --key "${V02ENC_KEY}" --input "${FILE2}" --output "${TEMPFILE2}" 2>/dev/null
+        echo -n "${V02ENC_PASSPHRASE}" | /usr/bin/env xxd -p -r | "${SCRIPT_DIR}/v02enc" --decrypt --key "${V02ENC_KEY}" --input "${FILE2}" --output "${TEMPFILE2}" 2>/dev/null
 
         # store exit code
         EXITCODE2="$?"
@@ -64,7 +95,7 @@ then
         if [[ "${EXITCODE2}" -eq "0" ]]
         then
           # set restrictive temporary file access
-          chmod 600 "${TEMPFILE2}"
+          /usr/bin/env chmod 600 "${TEMPFILE2}"
         fi
       fi
 
@@ -84,13 +115,13 @@ then
       if [[ -f "${FILE1}" ]]
       then
         # try to delete the temporary file either way
-        rm -f "${TEMPFILE1}"
+        /usr/bin/env rm -f "${TEMPFILE1}"
       fi
 
       if [[ -f "${FILE2}" ]]
       then
         # try to delete the temporary file either way
-        rm -f "${TEMPFILE2}"
+        /usr/bin/env rm -f "${TEMPFILE2}"
       fi
     fi
   fi
@@ -144,7 +175,7 @@ then
         OUTPUT[1]="+++ b/${FILENAME}"
       fi
 
-      printf '%s\n' "${OUTPUT[@]}" | colordiff
+      printf "%s\n" "${OUTPUT[@]}" | /usr/bin/env colordiff
     else
       # prepare placeholders
       PLACEHOLDER1=""
@@ -164,10 +195,10 @@ then
         PLACEHOLDER2="b/${FILENAME}"
       fi
 
-      echo -e "Binary files ${PLACEHOLDER1} and ${PLACEHOLDER2} differ\n" | colordiff
+      echo -e "Binary files ${PLACEHOLDER1} and ${PLACEHOLDER2} differ\n" | /usr/bin/env colordiff
     fi
   else
     # just output the text
-    printf '%s\n' "${OUTPUT[@]}"
+    printf "%s\n" "${OUTPUT[@]}"
   fi
 fi

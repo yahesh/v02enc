@@ -1014,6 +1014,62 @@ function check_key($options, $arguments, &$error) {
   return $result;
 }
 
+function check_keychain($options, $arguments, &$error) {
+  $result = false;
+
+  $keychain = get_opt_values($options, "c", "keychain");
+  if (0 < count($keychain)) {
+    # check if we are running on macOS
+    if (0 === strcasecmp(php_uname("s"), "darwin")) {
+      # get the real uid and try to retrieve the corresponding username
+      $user = posix_getpwuid(posix_getuid());
+
+      if ((false !== $user) && array_key_exists("name", $user)) {
+        $result = [];
+
+        foreach ($keychain as $keychainvalue) {
+          # prepare output
+          $output = null;
+
+          # execute the external command
+          $line = exec("/usr/bin/env security find-generic-password -a '".escapeshellarg($user["name"])."' -s '".escapeshellarg($keychainvalue)."' -w 2>/dev/null", $output, $exitcode);
+
+          if ((false !== $line) && (0 < count($output)) && (0 === $exitcode)) {
+            # decode keychain entry
+            $tmp = hex2bin(implode("", $output));
+
+            if ((false !== $tmp) && (0 < strlen($tmp))) {
+              $result[] = $tmp;
+            } else {
+              if (!is_array($error)) {
+                $error = [];
+              }
+              $error[] = "Keychain entry is malformed: {$keychainvalue}";
+            }
+          } else {
+            if (!is_array($error)) {
+              $error = [];
+            }
+            $error[] = "Keychain entry does not exist: {$keychainvalue}";
+          }
+        }
+      } else {
+        if (!is_array($error)) {
+          $error = [];
+        }
+        $error[] = "Could not retrieve the process username.";
+      }
+    } else {
+      if (!is_array($error)) {
+        $error = [];
+      }
+      $error[] = "Keychain entries are only supported on macOS.";
+    }
+  }
+
+  return $result;
+}
+
 function check_input($options, $arguments, &$error) {
   $result = false;
 
@@ -1138,6 +1194,7 @@ function get_long_opts() {
           "help",      // help without a value
           "input:",    // input with a required value
           "key:",      // key with a required value
+          "keychain:", // keychain with a required value
           "message:",  // message with a required value
           "output:",   // output with a required value
           "password:", // password with a required value
@@ -1146,6 +1203,7 @@ function get_long_opts() {
 
 function get_short_opts() {
   return  "a"   // armor without a value
+         ."c:"  // keychain with a required value
          ."d"   // decrypt without a value
          ."e"   // encrypt without a value
          ."h"   // help without a value
@@ -1166,13 +1224,15 @@ function print_info($string) {
 }
 
 function print_help() {
-  print("v02enc v0.2b4\n");
+  print("v02enc v0.2b5\n");
   print("\n");
   print("Usage:\n");
+  print("======\n");
   print("\n");
   print("./".basename(__FILE__)."\n");
   print("  [-d|--decrypt|-e|--encrypt|-u <file>|--update <file>]\n");
   print("  [-a|--armor]\n");
+  print("  [-c <string>|--keychain <string>]\n");
   print("  [-h|-help]\n");
   print("  [-i <file>|--input <file>]\n");
   print("  [-k <file>|--key <file>]*\n");
@@ -1182,18 +1242,23 @@ function print_help() {
   print("  [<file>]\n");
   print("\n");
   print("Options:\n");
+  print("========\n");
   print("\n");
   print("  -d          | --decrypt           Decrypt a message.\n");
   print("  -e          | --encrypt           Encrypt a message.\n");
   print("  -u <file>   | --update <file>     Update an encrypted message with the contents in <file>.\n");
   print("                                    <file> can be \"-\" to read from STDIN.\n");
   print("  -a          | --armor             ASCII-armor the encrypted message.\n");
+  print("  -c <string> | --keychain <string> Use the hex-decoded generic password in the macOS\n");
+  print("                                    keychain with the name <string> as an encryption key.\n");
+  print("                                    This option can be provided multiple times.\n");
   print("  -h          | --help              Print this help.\n");
   print("  -i <file>   | --input <file>      Use <file> as the input.\n");
   print("                                    <file> can be \"-\" to read from STDIN.\n");
   print("                                    The default is STDIN.\n");
   print("  -k <file>   | --key <file>        Use the contents in <file> as an encryption key.\n");
   print("                                    This option can be provided multiple times.\n");
+  print("                                    <file> can be \"-\" to read from STDIN.\n");
   print("  -m <string> | --message <string>  Use <string> as the input.\n");
   print("  -o <file>   | --output <file>     Use <file> as the output.\n");
   print("                                    <file> can be \"-\" to write to STDOUT.\n");
@@ -1206,10 +1271,35 @@ function print_help() {
   print("                                    The default is STDIN.\n");
   print("\n");
   print("Notes:\n");
+  print("======\n");
   print("\n");
   print("* You can only use one mode at a time, so either decrypt, encrypt or update.\n");
   print("* You can only use one input at a time.\n");
   print("* You can only use one output at a time.\n");
+  print("\n");
+  print("macOS Keychain:\n");
+  print("===============\n");
+  print("\n");
+  print("You can add a password to the macOS keychain like this:\n");
+  print("> security \\\n");
+  print("    add-generic-password \\\n");
+  print("    -a \"$(whoami)\" \\\n");
+  print("    -s \"<string>\" \\\n");
+  print("    -U \\\n");
+  print("    -w \"$(echo -n \"Password: \" >&2 && \\\n");
+  print("          read -s password && \\\n");
+  print("          echo \$password | \\\n");
+  print("          xxd -p | \\\n");
+  print("          tr -d \"\\n\")\"\n");
+  print("\n");
+  print("You can view a password in the macOS keychain like this:\n");
+  print("> security \\\n");
+  print("    find-generic-password \\\n");
+  print("    -a \"$(whoami)\" \\\n");
+  print("    -s \"<string>\" \\\n");
+  print("    -w | \\\n");
+  print("    xxd -p -r\n");
+  
 }
 
 ##### MAIN FUNCTION #####
@@ -1228,6 +1318,7 @@ function main($arguments) {
   $file     = check_file(    $options, $arguments, $error);
   $help     = check_help(    $options, $arguments, $error);
   $key      = check_key(     $options, $arguments, $error);
+  $keychain = check_keychain($options, $arguments, $error);
   $input    = check_input(   $options, $arguments, $error);
   $message  = check_message( $options, $arguments, $error);
   $output   = check_output(  $options, $arguments, $error);
@@ -1266,6 +1357,11 @@ function main($arguments) {
               if (false !== $tmp) {
                 $recipients[] = $tmp;
               }
+            }
+          }
+          if (false !== $keychain) {
+            foreach ($keychain as $keychainvalue) {
+              $recipients[] = $keychainvalue;
             }
           }
           if (false !== $password) {

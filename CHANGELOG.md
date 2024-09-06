@@ -1,3 +1,7 @@
+# 0.2b5 (2024-09-06)
+
+* add `-c` and `--keychain` to use hex-decoded keys from the macOS keychain
+
 # 0.2b4 (2024-09-02)
 
 * do not check trailing content on update

@@ -28,10 +28,12 @@ diff = !for FILE in $(hg status -n) ; do hg v02hgdiff "$(hg root)/${FILE}" -o "$
 
 ```
 Usage:
+======
 
 ./v02enc
   [-d|--decrypt|-e|--encrypt|-u <file>|--update <file>]
   [-a|--armor]
+  [-c <string>|--keychain <string>]
   [-h|-help]
   [-i <file>|--input <file>]
   [-k <file>|--key <file>]*
@@ -41,18 +43,23 @@ Usage:
   [<file>]
 
 Options:
+========
 
   -d          | --decrypt           Decrypt a message.
   -e          | --encrypt           Encrypt a message.
   -u <file>   | --update <file>     Update an encrypted message with the contents in <file>.
                                     <file> can be "-" to read from STDIN.
   -a          | --armor             ASCII-armor the encrypted message.
+  -c <string> | --keychain <string> Use the hex-decoded generic password in the macOS
+                                    keychain with the name <string> as an encryption key.
+                                    This option can be provided multiple times.
   -h          | --help              Print this help.
   -i <file>   | --input <file>      Use <file> as the input.
                                     <file> can be "-" to read from STDIN.
                                     The default is STDIN.
   -k <file>   | --key <file>        Use the contents in <file> as an encryption key.
                                     This option can be provided multiple times.
+                                    <file> can be "-" to read from STDIN.
   -m <string> | --message <string>  Use <string> as the input.
   -o <file>   | --output <file>     Use <file> as the output.
                                     <file> can be "-" to write to STDOUT.
@@ -65,10 +72,34 @@ Options:
                                     The default is STDIN.
 
 Notes:
+======
 
 * You can only use one mode at a time, so either decrypt, encrypt or update.
 * You can only use one input at a time.
 * You can only use one output at a time.
+
+macOS Keychain:
+===============
+
+You can add a password to the macOS keychain like this:
+> security \
+    add-generic-password \
+    -a "$(whoami)" \
+    -s "<string>" \
+    -U \
+    -w "$(echo -n "Password: " >&2 && \
+          read -s password && \
+          echo $password | \
+          xxd -p | \
+          tr -d "\n")"
+
+You can view a password in the macOS keychain like this:
+> security \
+    find-generic-password \
+    -a "$(whoami)" \
+    -s "<string>" \
+    -w | \
+    xxd -p -r
 ```
 
 ## Examples
@@ -152,6 +183,39 @@ vim02enc ./example.txt.v02enc
 
 # using explicit passphrase file path
 V02ENC_KEY=~/.v02enc ./example.txt.v02enc
+```
+
+### Protect the random passphrase with a password
+
+```
+# generate the random passphrase
+head -c 32 /dev/random >~/.tmp
+
+# encrypt the random passphrase
+echo -n "Password: " >&2 && \
+read -s password && \
+echo >&2 && \
+echo $password | \
+v02enc --armor --encrypt --key - ~/.tmp >~/.v02enc
+
+# delete the unprotected random passphrase
+rm -f ~/.tmp
+
+# use the encrypted random passphrase to encrypt a message
+echo -n "Password: " >&2 && \
+read -s password && \
+echo >&2 && \
+echo $password | \
+v02enc --decrypt --key - ~/.v02enc | \
+v02enc --armor --encrypt --key - --message "This is a test." >./example.v02enc
+
+# use the encrypted random passphrase to decrypt the encrypted message
+echo -n "Password: " >&2 && \
+read -s password && \
+echo >&2 && \
+echo $password | \
+v02enc --decrypt --key - ~/.v02enc | \
+v02enc --decrypt --key - ./example.v02enc
 ```
 
 ## Origin

@@ -9,43 +9,74 @@ fi
 # set a default for the key file if none is given
 if [[ -z "${V02ENC_KEY}" ]]
 then
-  V02ENC_KEY=~/.v02enc
+  V02ENC_KEY="-"
 fi
 
-SCRIPT_DIR=$(dirname $(realpath "$0"))
+# set a de fault for the passphrase if non is given
+if [[ -z "${V02ENC_PASSPHRASE}" ]]
+then
+  # set to empty string by default
+  V02ENC_PASSPHRASE=""
+
+  if [[ "${V02ENC_KEY}" == "-" ]]
+  then
+    # check if there is a key file
+    if [[ -f ~/.v02enc ]]
+    then
+      # read the key file
+      V02ENC_PASSPHRASE="$(/usr/bin/env cat ~/.v02enc | /usr/bin/env xxd -p | /usr/bin/env tr -d "\n")"
+    else
+      # check if we are running macOS
+      OS="$(/usr/bin/env uname -s | /usr/bin/env tr "[:upper:]" "[:lower:]")"
+
+      if [[ "$OS" == "darwin" ]]
+      then
+        # try to read the default keychain value
+        TMP="$(/usr/bin/env security find-generic-password -a "$(/usr/bin/env whoami)" -s "v02enc" -w)"
+
+        if [[ "$?" -eq "0" ]]
+        then
+          V02ENC_PASSPHRASE="${TMP}"
+        fi
+      fi
+    fi
+  fi
+fi
+
+SCRIPT_DIR="$(/usr/bin/env dirname "$(/usr/bin/env realpath "$0")")"
 
 # prepare the exit code
 EXITCODE="0"
 
-if [[ -f "${V02ENC_KEY}" ]]
+if [[ ${V02ENC_KEY} == "-" || -f "${V02ENC_KEY}" ]]
 then
   # Do we update an existing file?
   UPDATE="0"
 
   # generate the temporary file name
-  TEMPFILE=$(/usr/bin/env mktemp)
+  TEMPFILE="$(/usr/bin/env mktemp)"
 
   if [[ -f "${1}" ]]
   then
     UPDATE="1"
 
     # decrypt the file
-    "${SCRIPT_DIR}/v02enc" --decrypt --key "${V02ENC_KEY}" --input "${1}" --output "${TEMPFILE}"
+    echo -n "${V02ENC_PASSPHRASE}" | /usr/bin/env xxd -p -r | "${SCRIPT_DIR}/v02enc" --decrypt --key "${V02ENC_KEY}" --input "${1}" --output "${TEMPFILE}"
   else
     # create the temporary file
-    touch "${TEMPFILE}"
+    /usr/bin/env touch "${TEMPFILE}"
   fi
 
   if [[ "$?" -eq "0" ]]
   then
     # set restrictive temporary file access
-    chmod 600 "${TEMPFILE}"
+    /usr/bin/env chmod 600 "${TEMPFILE}"
 
     # only proceed if the temporary file is somewhat protected
     if [[ "$?" -eq "0" ]]
     then
       # get the last-modified date of the temporary file
-      LASTMODIFIED=$(date -r "${TEMPFILE}" "+%s")
+      LASTMODIFIED="$(/usr/bin/env date -r "${TEMPFILE}" "+%s")"
 
       # open vim as the editor but disable the swap file
       /usr/bin/env vim -n "${TEMPFILE}"
@@ -57,7 +88,7 @@ then
         SUCCESS="0"
 
         # get the new last-modified date of the temporary file
-        NEWMODIFIED=$(date -r "${TEMPFILE}" "+%s")
+        NEWMODIFIED="$(/usr/bin/env date -r "${TEMPFILE}" "+%s")"
 
         # only change the original file if the temporary file has changed
         if [[ "${NEWMODIFIED}" -gt "${LASTMODIFIED}" ]]
@@ -66,14 +97,14 @@ then
           if [[ "${UPDATE}" -eq "1" ]]
           then
             # generate the temporary output file name
-            OUTPUTFILE=$(/usr/bin/env mktemp)
+            OUTPUTFILE="$(/usr/bin/env mktemp)"
 
             # use armored output
             if [[ "${V02ENC_ARMOR}" -eq "1" ]]
             then
-              "${SCRIPT_DIR}/v02enc" --armor --input "${1}" --key "${V02ENC_KEY}" --output "${OUTPUTFILE}" --update "${TEMPFILE}"
+              echo -n "${V02ENC_PASSPHRASE}" | /usr/bin/env xxd -p -r | "${SCRIPT_DIR}/v02enc" --armor --input "${1}" --key "${V02ENC_KEY}" --output "${OUTPUTFILE}" --update "${TEMPFILE}"
             else
-              "${SCRIPT_DIR}/v02enc" --input "${1}" --key "${V02ENC_KEY}" --output "${OUTPUTFILE}" --update "${TEMPFILE}"
+              echo -n "${V02ENC_PASSPHRASE}" | /usr/bin/env xxd -p -r | "${SCRIPT_DIR}/v02enc" --input "${1}" --key "${V02ENC_KEY}" --output "${OUTPUTFILE}" --update "${TEMPFILE}"
             fi
 
             # keep exit code
@@ -83,13 +114,13 @@ then
             if [[ "${SUCCESS}" -eq "0" ]]
             then
               # use cat to keep file owner and file mode
-              cat "${OUTPUTFILE}" >"${1}"
+              /usr/bin/env cat "${OUTPUTFILE}" >"${1}"
 
               # clean up the temporary output file
               if [[ "$?" -eq "0" ]]
               then
                 # try to delete the temporary output file
-                rm -f "${OUTPUTFILE}"
+                /usr/bin/env rm -f "${OUTPUTFILE}"
               else
                 # throw a tantrum if cat failed, we are about to lose the original file!
                 echo "ERROR: Writing the encrypted data back to the original file failed!" >&2
@@ -104,9 +135,9 @@ then
             # use armored output
             if [[ "${V02ENC_ARMOR}" -eq "1" ]]
             then
-              "${SCRIPT_DIR}/v02enc" --armor --encrypt --input "${TEMPFILE}" --key "${V02ENC_KEY}" --output "${1}"
+              echo -n "${V02ENC_PASSPHRASE}" | /usr/bin/env xxd -p -r | "${SCRIPT_DIR}/v02enc" --armor --encrypt --input "${TEMPFILE}" --key "${V02ENC_KEY}" --output "${1}"
             else
-              "${SCRIPT_DIR}/v02enc" --encrypt --input "${TEMPFILE}" --key "${V02ENC_KEY}" --output "${1}"
+              echo -n "${V02ENC_PASSPHRASE}" | /usr/bin/env xxd -p -r | "${SCRIPT_DIR}/v02enc" --encrypt --input "${TEMPFILE}" --key "${V02ENC_KEY}" --output "${1}"
             fi
 
             # keep exit code
@@ -136,7 +167,7 @@ then
   fi
 
   # try to delete the temporary file either way
-  rm -f "${TEMPFILE}"
+  /usr/bin/env rm -f "${TEMPFILE}"
 else
   echo "ERROR: v02enc key file does not exit: ${V02ENC_KEY}" >&2
   EXITCODE="1"
