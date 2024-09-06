@@ -1285,6 +1285,7 @@ function print_help() {
   print("    add-generic-password \\\n");
   print("    -a \"$(whoami)\" \\\n");
   print("    -s \"<string>\" \\\n");
+  print("    -t \"\" \\\n");
   print("    -U \\\n");
   print("    -w \"$(echo -n \"Password: \" >&2 && \\\n");
   print("          read -s password && \\\n");

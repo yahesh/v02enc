@@ -86,6 +86,7 @@ You can add a password to the macOS keychain like this:
     add-generic-password \
     -a "$(whoami)" \
     -s "<string>" \
+    -t "" \
     -U \
     -w "$(echo -n "Password: " >&2 && \
           read -s password && \
