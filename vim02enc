@@ -169,7 +169,7 @@ then
   # try to delete the temporary file either way
   /usr/bin/env rm -f "${TEMPFILE}"
 else
-  echo "ERROR: v02enc key file does not exit: ${V02ENC_KEY}" >&2
+  echo "ERROR: v02enc key file does not exist: ${V02ENC_KEY}" >&2
   EXITCODE="1"
 fi
 
