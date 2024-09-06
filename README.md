@@ -86,7 +86,7 @@ You can add a password to the macOS keychain like this:
     add-generic-password \
     -a "$(whoami)" \
     -s "<string>" \
-    -t "" \
+    -T "" \
     -U \
     -w "$(echo -n "Password: " >&2 && \
           read -s password && \
@@ -196,7 +196,7 @@ head -c 32 /dev/random >~/.tmp
 echo -n "Password: " >&2 && \
 read -s password && \
 echo >&2 && \
-echo $password | \
+echo -n $password | \
 v02enc --armor --encrypt --key - ~/.tmp >~/.v02enc
 
 # delete the unprotected random passphrase
@@ -206,7 +206,7 @@ rm -f ~/.tmp
 echo -n "Password: " >&2 && \
 read -s password && \
 echo >&2 && \
-echo $password | \
+echo -n $password | \
 v02enc --decrypt --key - ~/.v02enc | \
 v02enc --armor --encrypt --key - --message "This is a test." >./example.v02enc
 
@@ -214,7 +214,7 @@ v02enc --armor --encrypt --key - --message "This is a test." >./example.v02enc
 echo -n "Password: " >&2 && \
 read -s password && \
 echo >&2 && \
-echo $password | \
+echo -n $password | \
 v02enc --decrypt --key - ~/.v02enc | \
 v02enc --decrypt --key - ./example.v02enc
 ```
