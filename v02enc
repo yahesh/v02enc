@@ -950,33 +950,33 @@ function zeroize_array(&$array) {
 
 ##### HELPER FUNCTIONS #####
 
-function check_armor($options, $arguments, &$error) {
+function check_armor($options, $rest, &$error) {
   return (0 < count(get_opt_values($options, "a", "armor")));
 }
 
-function check_decrypt($options, $arguments, &$error) {
+function check_decrypt($options, $rest, &$error) {
   return (0 < count(get_opt_values($options, "d", "decrypt")));
 }
 
-function check_encrypt($options, $arguments, &$error) {
+function check_encrypt($options, $rest, &$error) {
   return (0 < count(get_opt_values($options, "e", "encrypt")));
 }
 
-function check_file($options, $arguments, &$error) {
+function check_file($options, $rest, &$error) {
   $result = false;
 
-  if (1 === count($arguments)) {
-    if ("-" === $arguments[0]) {
+  if (1 === count($rest)) {
+    if ("-" === $rest[0]) {
       $result = "php://stdin";
-    } elseif (is_file($arguments[0])) {
-      $result = $arguments[0];
+    } elseif (is_file($rest[0])) {
+      $result = $rest[0];
     } else {
       if (!is_array($error)) {
         $error = [];
       }
-      $error[] = "File does not exist: {$arguments[0]}";
+      $error[] = "File does not exist: {$rest[0]}";
     }
-  } elseif (1 < count($arguments)) {
+  } elseif (1 < count($rest)) {
     if (!is_array($error)) {
       $error = [];
     }
@@ -986,11 +986,11 @@ function check_file($options, $arguments, &$error) {
   return $result;
 }
 
-function check_help($options, $arguments, &$error) {
+function check_help($options, $rest, &$error) {
   return (0 < count(get_opt_values($options, "h", "help")));
 }
 
-function check_key($options, $arguments, &$error) {
+function check_key($options, $rest, &$error) {
   $result = false;
 
   $key = get_opt_values($options, "k", "key");
@@ -1014,7 +1014,7 @@ function check_key($options, $arguments, &$error) {
   return $result;
 }
 
-function check_keychain($options, $arguments, &$error) {
+function check_keychain($options, $rest, &$error) {
   $result = false;
 
   $keychain = get_opt_values($options, "c", "keychain");
@@ -1070,7 +1070,7 @@ function check_keychain($options, $arguments, &$error) {
   return $result;
 }
 
-function check_input($options, $arguments, &$error) {
+function check_input($options, $rest, &$error) {
   $result = false;
 
   $input = get_opt_values($options, "i", "input");
@@ -1095,7 +1095,7 @@ function check_input($options, $arguments, &$error) {
   return $result;
 }
 
-function check_message($options, $arguments, &$error) {
+function check_message($options, $rest, &$error) {
   $result = false;
 
   $message = get_opt_values($options, "m", "message");
@@ -1111,7 +1111,7 @@ function check_message($options, $arguments, &$error) {
   return $result;
 }
 
-function check_output($options, $arguments, &$error) {
+function check_output($options, $rest, &$error) {
   $result = false;
 
   $output = get_opt_values($options, "o", "output");
@@ -1133,7 +1133,7 @@ function check_output($options, $arguments, &$error) {
   return $result;
 }
 
-function check_password($options, $arguments, &$error) {
+function check_password($options, $rest, &$error) {
   $result = false;
 
   $password = get_opt_values($options, "p", "password");
@@ -1144,7 +1144,7 @@ function check_password($options, $arguments, &$error) {
   return $result;
 }
 
-function check_update($options, $arguments, &$error) {
+function check_update($options, $rest, &$error) {
   $result = false;
 
   $update = get_opt_values($options, "u", "update");
@@ -1224,7 +1224,7 @@ function print_info($string) {
 }
 
 function print_help() {
-  print("v02enc v0.2b5\n");
+  print("v02enc v0.2b6\n");
   print("\n");
   print("Usage:\n");
   print("======\n");
@@ -1309,27 +1309,27 @@ function main($arguments) {
   $result = 0;
 
   # parse the parameters
-  $options   = getopt(get_short_opts(), get_long_opts(), $rest_index);
-  $arguments = array_slice($arguments, $rest_index);
+  $options = getopt(get_short_opts(), get_long_opts(), $rest_index);
+  $rest    = array_slice($arguments, $rest_index);
 
   # set configuration
-  $armor    = check_armor(   $options, $arguments, $error);
-  $decrypt  = check_decrypt( $options, $arguments, $error);
-  $encrypt  = check_encrypt( $options, $arguments, $error);
-  $file     = check_file(    $options, $arguments, $error);
-  $help     = check_help(    $options, $arguments, $error);
-  $key      = check_key(     $options, $arguments, $error);
-  $keychain = check_keychain($options, $arguments, $error);
-  $input    = check_input(   $options, $arguments, $error);
-  $message  = check_message( $options, $arguments, $error);
-  $output   = check_output(  $options, $arguments, $error);
-  $password = check_password($options, $arguments, $error);
-  $update   = check_update(  $options, $arguments, $error);
+  $armor    = check_armor(   $options, $rest, $error);
+  $decrypt  = check_decrypt( $options, $rest, $error);
+  $encrypt  = check_encrypt( $options, $rest, $error);
+  $file     = check_file(    $options, $rest, $error);
+  $help     = check_help(    $options, $rest, $error);
+  $key      = check_key(     $options, $rest, $error);
+  $keychain = check_keychain($options, $rest, $error);
+  $input    = check_input(   $options, $rest, $error);
+  $message  = check_message( $options, $rest, $error);
+  $output   = check_output(  $options, $rest, $error);
+  $password = check_password($options, $rest, $error);
+  $update   = check_update(  $options, $rest, $error);
 
   # only proceed if we have not encountered a configuration error
   if ((!is_array($error)) || (0 === count($error))) {
     # handle help first
-    if ($help) {
+    if ($help || (1 === count($arguments))) {
       print_help();
     } else {
       # ensure that only one mode is selected

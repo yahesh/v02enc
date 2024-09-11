@@ -1,3 +1,7 @@
+# 0.2b6 (2024-09-11)
+
+* show help if no arguments are provided
+
 # 0.2b5 (2024-09-06)
 
 * add `-c` and `--keychain` to use hex-decoded keys from the macOS keychain
