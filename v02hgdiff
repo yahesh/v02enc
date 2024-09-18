@@ -71,7 +71,7 @@ then
         if [[ "${EXITCODE1}" -eq "0" ]]
         then
           # set restrictive temporary file access
-          /usr/bin/env chmod 600 "${TEMPFILE1}"
+          /usr/bin/env chmod 400 "${TEMPFILE1}"
         fi
       fi
 
@@ -86,7 +86,7 @@ then
         if [[ "${EXITCODE2}" -eq "0" ]]
         then
           # set restrictive temporary file access
-          /usr/bin/env chmod 600 "${TEMPFILE2}"
+          /usr/bin/env chmod 400 "${TEMPFILE2}"
         fi
       fi
 
