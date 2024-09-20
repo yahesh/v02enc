@@ -35,6 +35,9 @@
 define("ARMOR_FOOTER", "-----END V02ENC MESSAGE-----");
 define("ARMOR_HEADER", "-----BEGIN V02ENC MESSAGE-----");
 
+# define KDF iterations
+define("KDF_ITERATIONS", 512000);
+
 # define lengths
 define("AES256_BLOCK_SIZE",  16);
 define("AES256_KEY_SIZE",    32);
@@ -508,7 +511,7 @@ function decrypt_header($input, $recipients, &$data, &$error) {
           foreach ($subkeys as $subkey) {
             foreach ($keys as $key) {
               # derive secure key from recipient key and salt
-              $data[SUBKEYLIST][$subkey][SUBKEY][$key] = hash_pbkdf2("sha256", $recipients[$key], $data[HEADERSALT], 512000, 0, true);
+              $data[SUBKEYLIST][$subkey][SUBKEY][$key] = hash_pbkdf2("sha256", $recipients[$key], $data[HEADERSALT], KDF_ITERATIONS, 0, true);
 
               if (false !== $data[SUBKEYLIST][$subkey][SUBKEY][$key]) {
                 # decrypt subkey with derived secure key
@@ -826,7 +829,7 @@ function encrypt_v02($input, $output, $recipients, &$error) {
 
                 $keys = array_keys($recipients);
                 foreach ($keys as $key) {
-                  $data[SUBKEY][$key] = hash_pbkdf2("sha256", $recipients[$key], $data[HEADERSALT], 512000, 0, true);
+                  $data[SUBKEY][$key] = hash_pbkdf2("sha256", $recipients[$key], $data[HEADERSALT], KDF_ITERATIONS, 0, true);
 
                   if (false !== $data[SUBKEY][$key]) {
                     $data[SUBKEYHEADER][$key] = openssl_encrypt($data[KEY], "aes-256-ctr", $data[SUBKEY][$key], OPENSSL_RAW_DATA | OPENSSL_ZERO_PADDING, $data[HEADERNONCE]);
@@ -1224,7 +1227,7 @@ function print_info($string) {
 }
 
 function print_help() {
-  print("v02enc v0.2b6\n");
+  print("v02enc v0.2b7\n");
   print("\n");
   print("Usage:\n");
   print("======\n");

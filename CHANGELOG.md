@@ -1,3 +1,7 @@
+# 0.2b7 (2024-09-20)
+
+* move KDF iterations into a seperate constant
+
 # 0.2b6 (2024-09-11)
 
 * show help if no arguments are provided
